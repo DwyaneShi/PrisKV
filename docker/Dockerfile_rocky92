@@ -1,0 +1,9 @@
+FROM docker.io/library/rockylinux:9.2
+
+RUN yum update -y && \
+    yum install -y git gcc gcc-c++ make cmake librdmacm rdma-core-devel libibverbs \
+        ncurses-devel libmount-devel libevent-devel openssl-devel rpm-build \
+        rpmdevtools rpmlint python3-devel python3-pip && \
+    pip3 install pybind11
+ADD . /root/priskv
+RUN cd /root/priskv && make pkg

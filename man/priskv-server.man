@@ -1,0 +1,224 @@
+.\" priskv-server man page
+.TH PRISKV-SERVER 1 "__PRISKV_VERSION__" "Volcano Engine PRISKV"
+
+.SH NAME
+\fBpriskv-server \fP\- High Performance Key-Value storage server
+
+.SH SYNOPSIS
+\fBpriskv-server\fP \fB\-a/\-\-addr\fP ADDR [\fB\-p/\-\-port\fP PORT] [\fB\-f/\-\-memfile\fP PATH]
+    [\fB\-c/\-\-value\-block\-size\fP BYTES] [\fB\-b/\-\-value\-blocks\fP BLOCKS]
+    [\fB\-t/\-\-threads\fP THREADS] [\fB\-B/\-\-busy\fP] [\fB\-l/\-\-log\-level\fP LEVEL]
+    [\fB\-A/\-\-http\-addr\fP ADDR] [\fB\-P/\-\-http\-port\fP PORT]
+    [\fB\-e/\-\-expire\-routine\-interval\fP INTERVAL]
+    [\fB\-\-http\-cert\fP PATH] [\fB\-\-http\-key\fP PATH] [\fB\-\-http\-ca\fP PATH]
+    [\fB\-\-http\-verify\-client\fP [off/optional/on]] [\fB\-h/\-\-help\fP]
+
+.SH DESCRIPTION
+PRISKV is specifically designed for modern high-performance computing (HPC) 
+and artificial intelligence (AI) computing. It solely supports RDMA. 
+PRISKV also supports GDR (GPU Direct RDMA), enabling the value of a key to 
+be directly transferred between PRISKV and the GPU.
+.sp
+\fBpriskv-server\fP is a server that implements the PRISKV protocol.
+
+.SH OPTIONS
+\fB\-a/\-\-addr\fP ADDR
+    bind to ADDR, support as max as 32 addresses. Ex, \-a xx.xx.xx.xx \-a yy.yy.yy.yy
+.sp
+\fB\-p/\-\-port\fP PORT
+    listen to PORT, default 18512
+.sp
+\fB\-f/\-\-memfile\fP PATH
+    load memory file from tmpfs/hugetlbfs
+.sp
+\fB\-c/\-\-max\-inflight\-command\fP COMMANDS
+    the maxium count of inflight command, default 128, max 4096
+.sp
+\fB\-s/\-\-max\-sgl\fP SGLS
+    the maxium count of scatter gather list, default 4, max 16
+.sp
+\fB\-k/\-\-max\-keys\fP KEYS
+    the maxium count of KV, default 16384, max 1073741824
+.sp
+\fB\-K/\-\-max\-key\-length\fP BYTES
+    the maxium bytes of a key, default 128, max 1024
+.sp
+\fB\-v/\-\-value\-block\-size\fP BYTES
+    the block size of minimal value in bytes, must be power of 2, default 4096, max 1048576
+.sp
+\fB\-b/\-\-value\-blocks\fP BLOCKS
+    the count of value blocks, must be power of 2, default 1048576, max 1073741824
+.sp
+\fB\-t/\-\-threads\fP THREADS
+    the number of worker threads, default 1
+.sp
+\fB\-e/\-\-expire\-routine\-interval\fP INTERVAL
+    the interval to auto-clean expired kv in second, default 600
+.sp
+\fB\-B/\-\-busy\fP
+    the worker threads run in busy\-poll mode, default event\-based
+.sp
+\fB\-l/\-\-log\-level\fP LEVEL
+    error, warn, notice[\fBdefault\fP], info or debug
+.sp
+\fB\-L/\-\-log\-file\fP FILEPATH
+    log to FILEPATH 
+    log FILEPATH options:
+        (stdout)            print to stdout
+        (stderr)            print to stderr
+        (null)              discard all logs
+        (file:PATH)         print to file PATH
+        (multifile:PATH)    print to multiple files based on log level
+        (unix:PATH)         print to unix socket
+.sp
+\fB\-A/\-\-http\-addr\fP ADDR
+    listen to ADDR, support IPv4 and IPv6
+.sp
+\fB\-P/\-\-http\-port\fP PORT
+    listen to PORT, default 18512
+.sp
+\fB\-\-http\-cert\fP PATH
+    the path of the certificate file
+.sp
+\fB\-\-http\-key\fP PATH
+    the path of the key file
+.sp
+\fB\-\-http\-ca\fP PATH
+    the path of the CA file
+.sp
+\fB\-\-http\-verify\-client\fP [\fBoff/optional/on]
+    the client certificate verification mode
+
+.SH HTTP Service
+If you want to get some information from priskv-server, start the HTTP service
+with '\fB\-A/\-\-http\-addr\fP ADDR' and '\fB\-P/\-\-http\-port\fP PORT'. 
+
+.SS HTTP API
+Path is 'http://<ADDRESS>/api/<\fIPATH\fP>', \fIPATH\fP> is shown below.
+
+\fBacl\fP
+    Set or get ACL rules of priskv-server. Run
+        \fIcurl -i -X "<HTTP Method>" "http://<ADDRESS>/api/acl?action=<ACTION>" [-d '{"rules": ["<RULES1>", "<RULES2>"]}'] \fP
+    and <\fIACTION\fP> including
+.TS
+    tab(|);
+    l l l l.
+    \fBACTION|HTTP Method|HTTP Body|INSTRUCTION\fP
+    \fIlist\fP|GET|no need|query ACL rules of priskv-server
+    \fIadd\fP|POST|{"rules": ["<RULES1>", "<RULES2>"]}|add ACL rules to priskv-server
+    \fIdel\fP|POST|{"rules": ["<RULES1>", "<RULES2>"]}|delete ACL rules from priskv-server
+.TE
+
+\fBinfo\fP
+    Query priskv-server runtime information in json format. Run:
+         \fIcurl -i "http://<ADDRESS>/api/info"\fP
+.sp
+    And you could get partial information by parameter \fIitem\fP. Run:
+        \fIcurl -i "http://<ADDRESS>/api/info?item=<ITEM>&item=<ITEM>"\fP
+    and, <\fIITEM\fP> including
+.TS
+    tab(|);
+    l l.
+    \fBITEM|INSTRUCTION\fP
+    \fIacl\fP|query the rule list of ACL
+    \fImemory\fP|query the memory configuration
+    \fIkv\fP|query the information of KV engine 
+    \fIconnection\fP|query the connection information with the client
+    \fIall\fP|query all the above information
+.TE
+.sp
+    \fBFor example\fP
+
+    Run \fIcurl -i "http://192.168.0.1:18512/api/info"\fP, and return
+
+        HTTP/1.1 200 OK
+        Content-Type: application/json
+        Content-Length: 768
+
+        {
+            "acl": {
+                "rules": [
+                    "192.168.0.2",
+                    "192.168.0.3"
+                ]
+            },
+            "memory": {
+                "type": "memfile",
+                "path": "\/run\/memfile",
+                "filesize": 17010688,
+                "pagesize": 4096
+            },
+            "kv": {
+                "keys_inuse": 2,
+                "keys_max": 1024,
+                "key_max_length": 128,
+                "value_block_size": 4096,
+                "value_blocks": 4096,
+                "value_blocks_inuse": 1
+            },
+            "connection": {
+                "listeners": [
+                    {
+                        "address": "192.168.0.1:4566",
+                        "clients": [
+                            {
+                                "address": "192.168.0.2:37161",
+                                "dying": false,
+                                "stats": {
+                                    "get_ops": 380758,
+                                    "get_bytes": 1559584768,
+                                    "set_ops": 1,
+                                    "set_bytes": 4096,
+                                    "test_ops": 0,
+                                    "delete_ops": 0,
+                                    "expire_ops": 0,
+                                    "resps": 380746
+                                }
+                            },
+                            {
+                                "address": "192.168.0.3:61497",
+                                "dying": false,
+                                "stats": {
+                                    "get_ops": 0,
+                                    "get_bytes": 0,
+                                    "set_ops": 1,
+                                    "set_bytes": 4096,
+                                    "test_ops": 0,
+                                    "delete_ops": 0,
+                                    "expire_ops": 0,
+                                    "resps": 1
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+\fBping\fP
+    Ping-Pong command. Run \fIcurl -i "http://<ADDRESS>/api/ping"\fP, and return 
+
+        HTTP/1.1 200 OK
+        Content-Length: 4
+        Content-Type: text/plain
+
+        pong
+
+\fBversion\fP
+    Query the version of running priskv-server. Run \fIcurl -i "http://<ADDRESS>/api/version"\fP,
+and return 
+
+        HTTP/1.1 200 OK
+        Content-Type: application/json
+        Content-Length: 30
+
+        { "version": "20240101" }
+
+.SH COPYRIGHT
+Copyright (c) 2025 ByteDance Ltd. and/or its affiliates
+
+.SH AUTHOR
+zhenwei pi <pizhenwei@bytedance.com>, Rui Zhang <zhangrui.1203@bytedance.com>
+
+.SH SEE ALSO
+\fBlibpriskv\fP(7), \fBpypriskv\fP(7)

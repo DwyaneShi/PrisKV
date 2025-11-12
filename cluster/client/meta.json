@@ -1,0 +1,46 @@
+{
+    "version": 1,
+    "nodes": [
+        {
+            "name": "node1",
+            "addr": "fdbd:dc0c:2:726::15",
+            "port": 9000,
+            "slots": [
+                {
+                    "start": 0,
+                    "end": 511
+                },
+                {
+                    "start": 1024,
+                    "end": 1535
+                }
+            ]
+        },
+        {
+            "name": "node2",
+            "addr": "fdbd:dc0c:2:726::15",
+            "port": 9001,
+            "slots": [
+                {
+                    "start": 512,
+                    "end": 1023
+                },
+                {
+                    "start": 1536,
+                    "end": 2047
+                }
+            ]
+        },
+        {
+            "name": "node3",
+            "addr": "fdbd:dc0c:2:726::15",
+            "port": 9002,
+            "slots": [
+                {
+                    "start": 2048,
+                    "end": 4095
+                }
+            ]
+        }
+    ]
+}

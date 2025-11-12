@@ -1,0 +1,12 @@
+[submodule "thirdparty/libvalkey"]
+	path = thirdparty/libvalkey
+	url = https://github.com/valkey-io/libvalkey.git
+[submodule "thirdparty/linenoise"]
+	path = thirdparty/linenoise
+	url = http://github.com/antirez/linenoise.git
+[submodule "thirdparty/json-c"]
+	path = thirdparty/json-c
+	url = https://github.com/json-c/json-c.git
+[submodule "thirdparty/libevhtp"]
+	path = thirdparty/libevhtp
+	url = https://github.com/Yellow-Camper/libevhtp.git

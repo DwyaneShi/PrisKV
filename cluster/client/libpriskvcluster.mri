@@ -1,0 +1,6 @@
+create libpriskvcluster.a
+addlib libpriskvcluster.tmp.a
+addlib ../../client/libpriskv.a
+addlib ../../thirdparty/json-c/build/libjson-c.a
+save
+end

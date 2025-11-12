@@ -1,0 +1,103 @@
+.TH pypriskv 7  "2024-11-6" "USER COMMANDS"
+.SH NAME
+pypriskv \- PRISKV client python runtime.
+
+.SH DESCRIPTION
+PRISKV is specifically designed for modern high-performance computing (HPC) and artificial intelligence (AI) computing. It solely supports RDMA. PRISKV also supports GDR (GPU Direct RDMA), enabling the value of a key to be directly transferred between PRISKV and the GPU.
+
+.SH EXAMPLES
+
+.P
+.in +0n
+.EX
+
+
+'''
+Copyright (c) 2025 ByteDance Ltd. and/or its affiliates
+
+Authors:
+    Changqi Lu <luchangqi.123@bytedance.com>
+
+'''
+import torch
+import priskv
+
+ip = "127.0.0.1"
+port = 8888
+
+######## PRISKVClient ########
+raw_client = priskv.PRISKVClient(ip, port)
+assert (raw_client != 0)
+
+# register mr
+reg_buf = torch.rand((1024 * 4), dtype=torch.float32).to("cuda:0")
+reg_buf_bytes = reg_buf.element_size() * reg_buf.numel()
+reg = raw_client.reg_memory(reg_buf.data_ptr(), reg_buf_bytes)
+assert (reg != 0)
+
+# set sgl
+sgl = priskv.SGL(reg_buf.data_ptr(), reg_buf_bytes, reg)
+
+# set key-value
+# device -> database
+ret = raw_client.set("key", sgl)
+assert (ret == 0)
+
+# test key
+ret = raw_client.test("key", reg_buf_bytes)
+assert (ret == True)
+
+# clear reg_buf
+reg_buf_copy = reg_buf.clone()
+reg_buf.zero_()
+
+# get key-value
+# database -> device
+ret = raw_client.get("key", sgl, reg_buf_bytes)
+assert (ret == 0)
+
+# data consistency verification
+assert (torch.equal(reg_buf_copy, reg_buf))
+
+# delete key
+ret = raw_client.delete("key")
+if ret != 0:
+    print("delete key failed")
+
+# dereg mr
+raw_client.dereg_memory(reg)
+
+# close conn
+raw_client.close()
+
+######## PRISKVTensorClient ########
+# set
+tensor_client = priskv.PRISKVTensorClient(ip, port)
+assert (tensor_client != 0)
+set_buf = torch.rand((1024 * 4), dtype=torch.float32).to("cuda:0")
+ret = tensor_client.set("key", set_buf)
+assert (ret == 0)
+
+# get
+get_buf = torch.zeros((1024 * 4), dtype=torch.float32).to("cuda:0")
+ret = tensor_client.get("key", get_buf)
+assert (ret == 0)
+
+# data consistency verification
+assert (torch.equal(get_buf, set_buf))
+
+# close conn
+tensor_client.close()
+
+print("test priskv success!")
+
+.EE
+.in
+.P
+
+
+.SH COPYRIGHT
+Copyright (c) 2025 ByteDance Ltd. and/or its affiliates
+
+.SH AUTHORS
+zhenwei pi <pizhenwei@bytedance.com>, Changqi Lu <luchangqi.123@bytedance.com>

@@ -1,0 +1,60 @@
+#!/usr/bin/python3
+import os
+import subprocess
+import threading
+import time
+
+
+def run_test(prog, result_list, index):
+    start = time.time()
+    p = subprocess.Popen(prog,
+                         shell=True,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+    stdout, stderr = p.communicate()
+    if p.wait():
+        print("PRISKV Unit test %s [FAILED]" % prog, end='')
+        result_list[index] = 1
+    else:
+        print("PRISKV Unit test %s [OK]" % prog, end='')
+        result_list[index] = 0
+    end = time.time()
+    elapsed_time = (end - start) * 1000 * 1000
+    print(f" ... [{elapsed_time:.0f} us]")
+    if len(stdout.decode()) > 0:
+        print(f"    {stdout.decode()}", end='')
+    if len(stderr.decode()) > 0:
+        print(f"    {stderr.decode()}", end='')
+
+
+def priskv_unit_test():
+    progs = [
+        "lib/test/test-event", "lib/test/test-threads", "lib/test/test-codec",
+        "./server/test/test-slab-mt", "./server/test/test-buddy",
+        "./server/test/test-buddy-mt", "./server/test/test-kv",
+        "./server/test/test-kv-mt", "./server/test/test-memory --no-tmpfs",
+        "./server/test/test-slab"
+    ]
+
+    print("---- PRISKV UNIT TEST ----")
+    result_list = [0] * len(progs)
+    threads = []
+
+    for i, prog in enumerate(progs):
+        thread = threading.Thread(target=run_test, args=(prog, result_list, i))
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    print("---- PRISKV UNIT TEST DONE ----")
+    if any(result_list):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    exit_code = priskv_unit_test()
+    if exit_code != 0:
+        exit(exit_code)

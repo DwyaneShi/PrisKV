@@ -1,0 +1,6 @@
+FROM docker.io/library/ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt update && apt install -y git gcc make cmake librdmacm-dev rdma-core libibverbs-dev libncurses5-dev libmount-dev libevent-dev libssl-dev dpkg-dev debhelper python3-pybind11 python3-dev python3-pip libhiredis-dev
+ADD . /root/priskv
+RUN cd /root/priskv && make pkg

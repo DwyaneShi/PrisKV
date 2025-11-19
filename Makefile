@@ -16,9 +16,9 @@ ifeq ($(__OS_NAME), unknown)
 $(error "Unknown OS name")
 endif
 
-.PHONY: all server client cluster test rebuild clean format pyclient pyclusterclient
+.PHONY: all server client cluster test rebuild clean format pyclient
 
-all: server client cluster pyclient pyclusterclient test
+all: server client cluster pyclient test
 
 version:
 	@echo "PrisKV Version: $(PRISKV_VERSION)"

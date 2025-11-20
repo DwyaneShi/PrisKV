@@ -98,7 +98,7 @@ jobs:
           make test
       - name: Unit Tests
         run: |
-          python run_unit_test.py
+          python -u run_unit_test.py
       - name: E2E Tests
         run: |
-          python run_e2e_test.py
+          python -u run_e2e_test.py

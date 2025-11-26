@@ -52,6 +52,9 @@ typedef struct pending_req {
 
 static uint8_t priskv_ucp_am_id_req = 1;
 static uint8_t priskv_ucp_am_id_resp = 2;
+static int send_am_req(priskv_client *client, const void *buf, size_t len);
+static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
+                           uint64_t timeout, uint64_t request_id, size_t *out_len);
 
 static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout)
 {
@@ -310,6 +313,7 @@ priskv_memory *priskv_reg_memory(priskv_client *client, uint64_t offset, size_t 
     impl->rkey_len = rkey_len;
     impl->iova = iova;
     impl->length = length;
+    impl->context = client->impl->context;
     m->impl = impl;
     return m;
 }
@@ -320,7 +324,7 @@ void priskv_dereg_memory(priskv_memory *mem)
     priskv_ucp_memory_impl *impl = mem->impl;
     if (impl) {
         if (impl->rkey_buf) ucp_rkey_buffer_release(impl->rkey_buf);
-        if (impl->memh) ucp_mem_unmap(ucp_context_from_memh(impl->memh), impl->memh);
+        if (impl->memh) ucp_mem_unmap(impl->context, impl->memh);
         free(impl);
     }
     free(mem);
@@ -332,7 +336,7 @@ static int send_am_req(priskv_client *client, const void *buf, size_t len)
     memset(&p, 0, sizeof(p));
     p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE;
     p.memory_type = UCS_MEMORY_TYPE_HOST;
-    void *r = ucp_am_send_nbx(client->impl->ep, priskv_ucp_am_id_req, buf, len, &p);
+    void *r = ucp_am_send_nbx(client->impl->ep, priskv_ucp_am_id_req, NULL, 0, buf, len, &p);
     if (UCS_PTR_IS_ERR(r)) return -1;
     return 0;
 }

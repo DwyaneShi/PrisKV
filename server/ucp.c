@@ -72,7 +72,7 @@ static void ucp_destroy_segs(ucp_rma_seg *segs, uint16_t n)
     free(segs);
 }
 
-static ucp_rma_seg *ucp_unpack_segs(ucp_worker_h worker, const priskv_request *req, const uint8_t *keyptr)
+static ucp_rma_seg *ucp_unpack_segs(ucp_ep_h ep, const priskv_request *req, const uint8_t *keyptr)
 {
     uint16_t nsgl = be16toh(req->nsgl);
     const priskv_keyed_sgl *sgls = req->sgls;
@@ -85,7 +85,7 @@ static ucp_rma_seg *ucp_unpack_segs(ucp_worker_h worker, const priskv_request *r
         uint16_t rkey_len = be16toh(rkey_len_be);
         p += sizeof(rkey_len_be);
         ucp_rkey_h rkey;
-        if (ucp_ep_rkey_unpack(NULL, p, &rkey) != UCS_OK) {
+        if (ucp_ep_rkey_unpack(ep, p, &rkey) != UCS_OK) {
             ucp_destroy_segs(segs, i);
             return NULL;
         }
@@ -131,7 +131,7 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
             priskv_get_key_end(keynode);
             goto send_resp;
         }
-        segs = ucp_unpack_segs(g_server.worker, req, keyptr);
+        segs = ucp_unpack_segs(reply_ep, req, keyptr);
         if (!segs) {
             resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
             resp.length = htobe32(0);
@@ -155,7 +155,7 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
         break;
     }
     case PRISKV_COMMAND_SET: {
-        segs = ucp_unpack_segs(g_server.worker, req, keyptr);
+        segs = ucp_unpack_segs(reply_ep, req, keyptr);
         if (!segs) {
             resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
             resp.length = htobe32(0);
@@ -258,7 +258,7 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
         break;
     }
     case PRISKV_COMMAND_KEYS: {
-        segs = ucp_unpack_segs(g_server.worker, req, keyptr);
+        segs = ucp_unpack_segs(reply_ep, req, keyptr);
         if (!segs || nsgl != 1) {
             resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
             resp.length = htobe32(0);
@@ -301,7 +301,7 @@ send_resp:
     if (segs) ucp_destroy_segs(segs, nsgl);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, &resp, sizeof(resp), &sp);
+    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
     if (UCS_PTR_IS_PTR(sr)) {
         while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
             ucp_worker_progress(g_server.worker);
@@ -362,6 +362,7 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     hp.id = priskv_ucp_am_id_req;
     hp.flags = UCP_AM_FLAG_WHOLE_MSG;
     hp.cb = priskv_ucp_am_req_cb;
+    hp.arg = NULL;
     ucp_worker_set_am_handler(g_server.worker, &hp);
 
     struct sockaddr_in listen_addr;

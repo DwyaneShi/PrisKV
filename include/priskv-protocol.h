@@ -132,66 +132,6 @@ typedef struct priskv_response {
     uint8_t reserved[10];
 } priskv_response;
 
-/*
- * currently version 0x01 is supported only.
- */
-#define PRISKV_RDMA_CM_VERSION 0x01
-
-/*
- * rdma connect request
- *
- * @version: must be PRISKV_RDMA_CM_VERSION
- * @max_sgl: request max SGLs from client.
- * @max_key_length: request max key length in bytes from client.
- * @max_inflight_command: request max inflight command(aka command depth) from client.
- *
- * @max_sgl, @max_key_length, @max_inflight_command must be less than or equal to the
- * limitations from the server side, otherwise the server rejects connection. Or specify 0 to
- * use the maximum value from server.
- */
-typedef struct priskv_rdma_cm_req {
-    uint16_t version;
-    uint16_t max_sgl;
-    uint16_t max_key_length;
-    uint16_t max_inflight_command;
-    uint8_t reserved[24];
-} priskv_rdma_cm_req;
-
-/*
- * rdma connect reply
- */
-typedef struct priskv_rdma_cm_rep {
-    uint16_t version;
-    uint16_t max_sgl;
-    uint16_t max_key_length;
-    uint16_t max_inflight_command;
-    uint64_t capacity;
-    uint8_t reserved[16];
-} priskv_rdma_cm_rep;
-
-/*
- * status on RDMA CM rejection
- */
-typedef enum priskv_rdma_cm_status {
-    PRISKV_RDMA_CM_REJ_STATUS_INVALID_CM_REP = 0x01,
-    PRISKV_RDMA_CM_REJ_STATUS_INVALID_VERSION = 0x02,
-    PRISKV_RDMA_CM_REJ_STATUS_INVALID_SGL = 0x03,
-    PRISKV_RDMA_CM_REJ_STATUS_INVALID_KEY_LENGTH = 0x04,
-    PRISKV_RDMA_CM_REJ_STATUS_INVALID_INFLIGHT_COMMAND = 0x05,
-    PRISKV_RDMA_CM_REJ_STATUS_ACL_REFUSE = 0x06,
-
-    PRISKV_RDMA_CM_REJ_STATUS_SERVER_ERROR = 0x10
-} priskv_rdma_cm_status;
-
-/*
- * rdma connect reject
- */
-typedef struct priskv_rdma_cm_rej {
-    uint16_t version;
-    uint16_t status; /* priskv_rdma_cm_status */
-    uint8_t reserved[4];
-    uint64_t value; /* indicate the supported value */
-} priskv_rdma_cm_rej;
 
 /*
  *assuming max timeout means no timeout

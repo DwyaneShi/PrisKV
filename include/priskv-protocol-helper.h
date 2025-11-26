@@ -114,33 +114,6 @@ static inline const char *priskv_resp_status_str(priskv_resp_status status)
     return "Unknown";
 }
 
-static inline const char *priskv_rdma_cm_status_str(priskv_rdma_cm_status status)
-{
-    switch (status) {
-    case PRISKV_RDMA_CM_REJ_STATUS_INVALID_CM_REP:
-        return "Invalid CM Reply";
-
-    case PRISKV_RDMA_CM_REJ_STATUS_INVALID_VERSION:
-        return "Invalid version";
-
-    case PRISKV_RDMA_CM_REJ_STATUS_INVALID_SGL:
-        return "Invalid SGL";
-
-    case PRISKV_RDMA_CM_REJ_STATUS_INVALID_KEY_LENGTH:
-        return "Invalid Key length";
-
-    case PRISKV_RDMA_CM_REJ_STATUS_INVALID_INFLIGHT_COMMAND:
-        return "Invalid inflight command";
-
-    case PRISKV_RDMA_CM_REJ_STATUS_ACL_REFUSE:
-        return "ACL refuse";
-
-    case PRISKV_RDMA_CM_REJ_STATUS_SERVER_ERROR:
-        return "server error";
-    }
-
-    return "Unknown";
-}
 
 static inline uint32_t priskv_sgl_size_from_be(priskv_keyed_sgl *sgls, uint16_t nsgl)
 {

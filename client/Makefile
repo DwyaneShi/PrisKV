@@ -45,7 +45,9 @@ COMMON_LIB_DEPS := $(COMMON_LIB_OBJS:%.o=%.d)
 LIBIBVERBS_VERSION = $(shell pkg-config --modversion libibverbs)
 LIBIBVERBS_VERSION_MAJOR = $(shell echo ${LIBIBVERBS_VERSION} | cut -d "." -f 1)
 LIBIBVERBS_VERSION_MINOR = $(shell echo ${LIBIBVERBS_VERSION} | cut -d "." -f 2)
-RDMA_LDFLAGS = -lrdmacm -libverbs -DLIBIBVERBS_VERSION_MAJOR=$(LIBIBVERBS_VERSION_MAJOR) -DLIBIBVERBS_VERSION_MINOR=$(LIBIBVERBS_VERSION_MINOR)
+UCX_CFLAGS = $(shell pkg-config --cflags ucx)
+UCX_LDFLAGS = $(shell pkg-config --libs ucx)
+RDMA_LDFLAGS = 
 
 CUDA_HOME ?= /usr/local/cuda
 CUDA_LIB ?= $(CUDA_HOME)/lib64
@@ -102,13 +104,13 @@ $(THIRDPARTY_SRCS):
 	git submodule update --init --recursive ../thirdparty/linenoise
 
 $(PRISKV_TARGETS): priskv-%: %.c $(STATIC_LIB) $(THIRDPARTY_SRCS)
-	$(CC) $< $(THIRDPARTY_SRCS) -o $@ $(STATIC_LIB) $(CFLAGS) $(RDMA_LDFLAGS) $(THIRDPARTY_INCFLAGS)
+	$(CC) $< $(THIRDPARTY_SRCS) -o $@ $(STATIC_LIB) $(CFLAGS) $(UCX_CFLAGS) $(UCX_LDFLAGS) $(THIRDPARTY_INCFLAGS)
 
 $(VALKEY_STATIC_LIB):
 	cd $(VALKEY_PATH) && USE_RDMA=1 make
 
 $(VALKEY_BENCHMARK_NAME): $(VALKEY_BENCHMARK_SRC) $(STATIC_LIB) $(VALKEY_STATIC_LIB)
-	$(CC) $^ $(CFLAGS) $(RDMA_LDFLAGS) $(CUDA_LDFLAGS) $(VALKEY_LDFLAGS) -o $@
+	$(CC) $^ $(CFLAGS) $(UCX_CFLAGS) $(UCX_LDFLAGS) $(CUDA_LDFLAGS) $(VALKEY_LDFLAGS) -o $@
 
 install: $(PRISKV_TARGETS)
 	install -m 755 -d $(PRISKV_DESTDIR)/$(PRISKV_BINPATH)

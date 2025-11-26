@@ -301,7 +301,7 @@ send_resp:
     if (segs) ucp_destroy_segs(segs, nsgl);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
+    void *sr = PRISKV_UCP_AM_SEND(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
     if (UCS_PTR_IS_PTR(sr)) {
         while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
             ucp_worker_progress(g_server.worker);
@@ -357,13 +357,8 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
         return -1;
     }
 
-    ucp_am_handler_param_t hp;
-    memset(&hp, 0, sizeof(hp));
-    hp.id = priskv_ucp_am_id_req;
-    hp.flags = UCP_AM_FLAG_WHOLE_MSG;
-    hp.cb = priskv_ucp_am_req_cb;
-    hp.arg = NULL;
-    ucp_worker_set_am_handler(g_server.worker, &hp);
+    PRISKV_UCP_AM_HANDLER(g_server.worker, priskv_ucp_am_id_req, priskv_ucp_am_req_cb, NULL,
+                          UCP_AM_FLAG_WHOLE_MSG);
 
     struct sockaddr_in listen_addr;
     memset(&listen_addr, 0, sizeof(listen_addr));
@@ -432,3 +427,26 @@ void priskv_ucp_free_listeners(priskv_ucp_listener *listeners, int nlisteners)
     if (!listeners) return;
     free(listeners);
 }
+/* UCX AM API compatibility */
+#ifndef PRISKV_UCP_AM_API_COMPAT
+#define PRISKV_UCP_AM_API_COMPAT
+#if defined(UCP_API_MAJOR) && (UCP_API_MAJOR > 1 || (UCP_API_MAJOR == 1 && UCP_API_MINOR >= 14))
+#define PRISKV_UCP_AM_HANDLER(worker, id, cb, arg, flags)                                             \
+    do {                                                                                              \
+        ucp_am_handler_param_t hp;                                                                    \
+        memset(&hp, 0, sizeof(hp));                                                                   \
+        hp.id = (id);                                                                                 \
+        hp.cb = (cb);                                                                                 \
+        hp.arg = (arg);                                                                               \
+        hp.flags = (flags);                                                                           \
+        ucp_worker_set_am_handler((worker), &hp);                                                     \
+    } while (0)
+#define PRISKV_UCP_AM_SEND(ep, id, header, header_len, payload, len, param)                           \
+    ucp_am_send_nbx((ep), (id), (header), (header_len), (payload), (len), (param))
+#else
+#define PRISKV_UCP_AM_HANDLER(worker, id, cb, arg, flags)                                             \
+    ucp_worker_set_am_handler((worker), (id), (cb), (arg), (flags))
+#define PRISKV_UCP_AM_SEND(ep, id, header, header_len, payload, len, param)                           \
+    ucp_am_send_nbx((ep), (id), (payload), (len), (param))
+#endif
+#endif

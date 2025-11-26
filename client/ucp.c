@@ -92,7 +92,7 @@ static void pend_remove(priskv_ucp_client_impl *impl, uint64_t id)
     impl->pendings = realloc(impl->pendings, impl->npending * sizeof(pending_req));
 }
 
-static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
+static ucs_status_t am_resp_cb_compat(void *arg, void *data, size_t length, ucp_ep_h reply_ep, unsigned flags)
 {
     priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
     priskv_response *resp = (priskv_response *)data;
@@ -160,9 +160,6 @@ static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_leng
             pend_remove(impl, id);
         }
     }
-    if (!(param->recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV)) {
-        ucp_am_data_release(impl->worker, data);
-    }
     return UCS_OK;
 }
 static priskv_client *priskv_client_new(void)
@@ -222,7 +219,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         return NULL;
     }
 
-    ucp_worker_set_am_handler(impl->worker, priskv_ucp_am_id_resp, am_resp_cb, impl,
+    ucp_worker_set_am_handler(impl->worker, priskv_ucp_am_id_resp, am_resp_cb_compat, impl,
                               UCP_AM_FLAG_WHOLE_MSG);
 
     struct sockaddr_in dst;
@@ -455,6 +452,21 @@ int priskv_keys_async(priskv_client *client, const char *regex, uint64_t request
     sgl.length = impl->keys_buf_len;
     sgl.mem = impl->keys_mem;
     return submit_req(client, PRISKV_COMMAND_KEYS, regex, &sgl, 1, 0, request_id, cb);
+}
+
+void priskv_keyset_free(priskv_keyset *keyset)
+{
+    if (!keyset) return;
+    for (uint32_t i = 0; i < keyset->nkey; i++) {
+        if (keyset->keys[i].key) free(keyset->keys[i].key);
+    }
+    if (keyset->keys) free(keyset->keys);
+    free(keyset);
+}
+
+uint64_t priskv_capacity(priskv_client *client)
+{
+    return 0;
 }
 /* UCX AM API compatibility */
 /* removed compatibility macros: use latest UCP AM APIs directly */

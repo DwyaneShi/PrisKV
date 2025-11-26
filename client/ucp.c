@@ -332,7 +332,7 @@ static int send_am_req(priskv_client *client, const void *buf, size_t len)
     memset(&p, 0, sizeof(p));
     p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE;
     p.memory_type = UCS_MEMORY_TYPE_HOST;
-    void *r = ucp_am_send_nbx(client->impl->ep, priskv_ucp_am_id_req, buf, len, &p);
+    void *r = ucp_am_send_nbx(client->impl->ep, priskv_ucp_am_id_req, NULL, 0, buf, len, &p);
     if (UCS_PTR_IS_ERR(r)) return -1;
     return 0;
 }

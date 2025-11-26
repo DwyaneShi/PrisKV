@@ -301,7 +301,7 @@ send_resp:
     if (segs) ucp_destroy_segs(segs, nsgl);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, &resp, sizeof(resp), &sp);
+    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
     if (UCS_PTR_IS_PTR(sr)) {
         while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
             ucp_worker_progress(g_server.worker);

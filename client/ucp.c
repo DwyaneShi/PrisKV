@@ -222,15 +222,8 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         return NULL;
     }
 
-    {
-        ucp_am_handler_param_t hp;
-        memset(&hp, 0, sizeof(hp));
-        hp.id = priskv_ucp_am_id_resp;
-        hp.flags = UCP_AM_FLAG_WHOLE_MSG;
-        hp.cb = am_resp_cb;
-        hp.arg = impl;
-        ucp_worker_set_am_handler(impl->worker, &hp);
-    }
+    ucp_worker_set_am_handler(impl->worker, priskv_ucp_am_id_resp, am_resp_cb, impl,
+                              UCP_AM_FLAG_WHOLE_MSG);
 
     struct sockaddr_in dst;
     memset(&dst, 0, sizeof(dst));
@@ -339,7 +332,7 @@ static int send_am_req(priskv_client *client, const void *buf, size_t len)
     memset(&p, 0, sizeof(p));
     p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE;
     p.memory_type = UCS_MEMORY_TYPE_HOST;
-    void *r = ucp_am_send_nbx(client->impl->ep, priskv_ucp_am_id_req, NULL, 0, buf, len, &p);
+    void *r = ucp_am_send_nbx(client->impl->ep, priskv_ucp_am_id_req, buf, len, &p);
     if (UCS_PTR_IS_ERR(r)) return -1;
     return 0;
 }

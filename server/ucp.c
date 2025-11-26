@@ -301,7 +301,7 @@ send_resp:
     if (segs) ucp_destroy_segs(segs, nsgl);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
+    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, &resp, sizeof(resp), &sp);
     if (UCS_PTR_IS_PTR(sr)) {
         while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
             ucp_worker_progress(g_server.worker);
@@ -357,13 +357,8 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
         return -1;
     }
 
-    ucp_am_handler_param_t hp;
-    memset(&hp, 0, sizeof(hp));
-    hp.id = priskv_ucp_am_id_req;
-    hp.flags = UCP_AM_FLAG_WHOLE_MSG;
-    hp.cb = priskv_ucp_am_req_cb;
-    hp.arg = NULL;
-    ucp_worker_set_am_handler(g_server.worker, &hp);
+    ucp_worker_set_am_handler(g_server.worker, priskv_ucp_am_id_req, priskv_ucp_am_req_cb, NULL,
+                              UCP_AM_FLAG_WHOLE_MSG);
 
     struct sockaddr_in listen_addr;
     memset(&listen_addr, 0, sizeof(listen_addr));

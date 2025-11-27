@@ -42,12 +42,8 @@ COMMON_LIB_SRCS = $(foreach dir,$(COMMON_LIB_DIR),$(wildcard $(dir)/*.c))
 COMMON_LIB_OBJS := $(COMMON_LIB_SRCS:%.c=%.o)
 COMMON_LIB_DEPS := $(COMMON_LIB_OBJS:%.o=%.d)
 
-LIBIBVERBS_VERSION = $(shell pkg-config --modversion libibverbs)
-LIBIBVERBS_VERSION_MAJOR = $(shell echo ${LIBIBVERBS_VERSION} | cut -d "." -f 1)
-LIBIBVERBS_VERSION_MINOR = $(shell echo ${LIBIBVERBS_VERSION} | cut -d "." -f 2)
 UCX_CFLAGS = $(shell pkg-config --cflags ucx)
 UCX_LDFLAGS = $(shell pkg-config --libs ucx)
-RDMA_LDFLAGS = 
 
 CUDA_HOME ?= /usr/local/cuda
 CUDA_LIB ?= $(CUDA_HOME)/lib64

@@ -345,7 +345,13 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
 
     impl->nqueue = nqueue;
     ucp_worker_get_efd(impl->worker, &impl->efd);
-    ucp_worker_arm(impl->worker);
+    {
+        ucs_status_t st;
+        do {
+            ucp_worker_progress(impl->worker);
+            st = ucp_worker_arm(impl->worker);
+        } while (st == UCS_ERR_BUSY);
+    }
     impl->owner = client;
     client->impl = impl;
     {
@@ -392,8 +398,12 @@ int priskv_get_fd(priskv_client *client)
 int priskv_process(priskv_client *client, uint32_t event)
 {
     if (!client || !client->impl) return -ENOTCONN;
-    ucp_worker_progress(client->impl->worker);
-    ucp_worker_arm(client->impl->worker);
+    priskv_log_debug("UCP: process event %u", event);
+    ucs_status_t st;
+    do {
+        ucp_worker_progress(client->impl->worker);
+        st = ucp_worker_arm(client->impl->worker);
+    } while (st == UCS_ERR_BUSY);
     return 0;
 }
 

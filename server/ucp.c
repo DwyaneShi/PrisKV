@@ -553,7 +553,13 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     int efd = -1;
     ucp_worker_get_efd(g_server.worker, &efd);
     g_server.epollfd = efd;
-    ucp_worker_arm(g_server.worker);
+    {
+        ucs_status_t st;
+        do {
+            ucp_worker_progress(g_server.worker);
+            st = ucp_worker_arm(g_server.worker);
+        } while (st == UCS_ERR_BUSY);
+    }
     return 0;
 }
 
@@ -570,7 +576,13 @@ static void priskv_ucp_progress_once(void)
 void priskv_ucp_process(void)
 {
     priskv_ucp_progress_once();
-    ucp_worker_arm(g_server.worker);
+    {
+        ucs_status_t st;
+        do {
+            ucp_worker_progress(g_server.worker);
+            st = ucp_worker_arm(g_server.worker);
+        } while (st == UCS_ERR_BUSY);
+    }
 }
 
 void *priskv_ucp_get_kv(void)

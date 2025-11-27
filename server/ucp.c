@@ -111,15 +111,44 @@ static ucp_rma_seg *ucp_unpack_segs(ucp_ep_h ep, const priskv_request *req, cons
 
 static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
-    priskv_request *req = (priskv_request *)data;
+    uint32_t recv_attr = param->recv_attr;
+    int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
+    int is_data = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_DATA);
+    uint8_t *msg = (uint8_t *)data;
+    size_t msg_len = length;
+    uint8_t *owned_buf = NULL;
+
+    if (is_rndv) {
+        owned_buf = (uint8_t *)malloc(length);
+        if (!owned_buf) {
+            priskv_log_error("UCP: no mem to receive RNDV data, length %zu", length);
+            ucp_am_data_release(g_server.worker, data);
+            return UCS_OK;
+        }
+        ucp_request_param_t rp;
+        memset(&rp, 0, sizeof(rp));
+        rp.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+        rp.memory_type = UCS_MEMORY_TYPE_HOST;
+        void *r = ucp_am_recv_data_nbx(g_server.worker, data, owned_buf, length, &rp);
+        if (UCS_PTR_IS_PTR(r)) {
+            while (ucp_request_check_status(r) == UCS_INPROGRESS) {
+                ucp_worker_progress(g_server.worker);
+            }
+            ucp_request_free(r);
+        }
+        msg = owned_buf;
+    }
+
     ucp_ep_h reply_ep = param->reply_ep;
     if (!reply_ep) {
-        priskv_log_error("UCP: reply_ep is NULL, recv_attr 0x%x; cannot respond", param->recv_attr);
-        if (!(param->recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV)) {
+        priskv_log_error("UCP: reply_ep is NULL, recv_attr 0x%x; cannot respond", recv_attr);
+        if (is_rndv) {
             ucp_am_data_release(g_server.worker, data);
         }
+        if (owned_buf) free(owned_buf);
         return UCS_OK;
     }
+    priskv_request *req = (priskv_request *)msg;
     uint16_t nsgl = be16toh(req->nsgl);
     uint16_t keylen = be16toh(req->key_length);
     uint64_t request_id = be64toh(req->request_id);
@@ -143,7 +172,7 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
     priskv_ucp_conn *conn = priskv_ucp_conn_get(reply_ep);
     priskv_ucp_conn_cap cap = conn ? conn->conn_cap : g_server.default_cap;
 
-    if (length < keyoff) {
+    if (msg_len < keyoff) {
         resp.status = htobe16(PRISKV_RESP_STATUS_INVALID_COMMAND);
         resp.length = htobe32(0);
         goto send_resp;
@@ -388,9 +417,10 @@ send_resp:
         }
         ucp_request_free(sr);
     }
-    if (!(param->recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV)) {
+    if (is_rndv) {
         ucp_am_data_release(g_server.worker, data);
     }
+    if (owned_buf) free(owned_buf);
     return UCS_OK;
 }
 

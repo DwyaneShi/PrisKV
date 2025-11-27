@@ -48,6 +48,7 @@ static void priskv_ucp_conn_add(ucp_ep_h ep);
 static void priskv_ucp_conn_remove(ucp_ep_h ep);
 static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
 static void priskv_ucp_listener_accept_cb(ucp_ep_h ep, void *arg);
+static void priskv_ucp_send_done(void *request, ucs_status_t status);
 
 typedef struct priskv_ucp_server {
     int epollfd;
@@ -428,8 +429,18 @@ send_resp:
     return UCS_OK;
 }
 
-static void priskv_ucp_listener_accept_cb(ucp_ep_h ep, void *arg)
+static void priskv_ucp_listener_conn_cb(ucp_listener_h listener, void *arg, const ucp_conn_request_h request)
 {
+    ucp_ep_params_t ep_params;
+    memset(&ep_params, 0, sizeof(ep_params));
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_CONN_REQUEST | UCP_EP_PARAM_FIELD_ERR_HANDLER;
+    ep_params.conn_request = request;
+    ep_params.err_handler.cb = priskv_ucp_ep_err_cb;
+    ucp_ep_h ep;
+    ucs_status_t status = ucp_ep_create(g_server.worker, &ep_params, &ep);
+    if (status != UCS_OK) {
+        return;
+    }
     priskv_ucp_conn_add(ep);
 }
 
@@ -506,11 +517,11 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
 
     ucp_listener_params_t lparams;
     memset(&lparams, 0, sizeof(lparams));
-    lparams.field_mask = UCP_LISTENER_PARAM_FIELD_SOCK_ADDR | UCP_LISTENER_PARAM_FIELD_ACCEPT_HANDLER;
+    lparams.field_mask = UCP_LISTENER_PARAM_FIELD_SOCK_ADDR | UCP_LISTENER_PARAM_FIELD_CONN_HANDLER;
     lparams.sockaddr.addr = (const struct sockaddr *)&listen_addr;
     lparams.sockaddr.addrlen = sizeof(listen_addr);
-    lparams.accept_handler.cb = priskv_ucp_listener_accept_cb;
-    lparams.accept_handler.arg = NULL;
+    lparams.conn_handler.cb = priskv_ucp_listener_conn_cb;
+    lparams.conn_handler.arg = NULL;
     status = ucp_listener_create(g_server.worker, &lparams, &g_server.listener);
     if (status != UCS_OK) {
         priskv_log_error("UCP: failed to create listener, status %s", ucs_status_string(status));
@@ -628,21 +639,6 @@ static void priskv_ucp_conn_remove(ucp_ep_h ep)
     free(e);
 }
 
-static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
-{
-    ucp_request_param_t p;
-    memset(&p, 0, sizeof(p));
-    p.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
-    p.flags = UCP_EP_CLOSE_FLAG_FORCE;
-    void *req = ucp_ep_close_nbx(ep, &p);
-    if (UCS_PTR_IS_PTR(req)) {
-        while (ucp_request_check_status(req) == UCS_INPROGRESS) {
-            ucp_worker_progress(g_server.worker);
-        }
-        ucp_request_free(req);
-    }
-    priskv_ucp_conn_remove(ep);
-}
 static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
     ucp_ep_h ep = param->reply_ep;
@@ -680,4 +676,19 @@ static void priskv_ucp_send_done(void *request, ucs_status_t status)
     if (request) {
         ucp_request_free(request);
     }
+}
+static void priskv_ucp_ep_err_cb(void *a, ucp_ep_h ep, ucs_status_t status)
+{
+    ucp_request_param_t p;
+    memset(&p, 0, sizeof(p));
+    p.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
+    p.flags = UCP_EP_CLOSE_FLAG_FORCE;
+    void *req = ucp_ep_close_nbx(ep, &p);
+    if (UCS_PTR_IS_PTR(req)) {
+        while (ucp_request_check_status(req) == UCS_INPROGRESS) {
+            ucp_worker_progress(g_server.worker);
+        }
+        ucp_request_free(req);
+    }
+    priskv_ucp_conn_remove(ep);
 }

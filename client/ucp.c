@@ -64,6 +64,7 @@ static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_leng
 static int send_am_req(priskv_client *client, const void *buf, size_t len);
 static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
                            uint64_t timeout, uint64_t request_id, size_t *out_len);
+static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
 
 static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
 {
@@ -297,10 +298,12 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
 
     ucp_ep_params_t ep_params;
     memset(&ep_params, 0, sizeof(ep_params));
-    ep_params.field_mask = UCP_EP_PARAM_FIELD_FLAGS | UCP_EP_PARAM_FIELD_SOCK_ADDR;
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_FLAGS | UCP_EP_PARAM_FIELD_SOCK_ADDR | UCP_EP_PARAM_FIELD_ERR_HANDLER | UCP_EP_PARAM_FIELD_ERR_HANDLER_ARG;
     ep_params.flags = UCP_EP_PARAMS_FLAGS_CLIENT_SERVER;
     ep_params.sockaddr.addr = (const struct sockaddr *)&dst;
     ep_params.sockaddr.addrlen = sizeof(dst);
+    ep_params.err_handler.cb = priskv_client_ep_err_cb;
+    ep_params.err_handler.arg = impl;
     if (ucp_ep_create(impl->worker, &ep_params, &impl->ep) != UCS_OK) {
         ucp_worker_destroy(impl->worker);
         ucp_cleanup(impl->context);
@@ -599,4 +602,18 @@ static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_leng
     }
     if (owned_buf) free(owned_buf);
     return UCS_OK;
+}
+static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
+{
+    priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
+    ucp_request_param_t p;
+    memset(&p, 0, sizeof(p));
+    p.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;
+    p.flags = UCP_EP_CLOSE_FLAG_FORCE;
+    void *req = ucp_ep_close_nbx(ep, &p);
+    if (UCS_PTR_IS_PTR(req)) {
+        while (ucp_request_check_status(req) == UCS_INPROGRESS) {}
+        ucp_request_free(req);
+    }
+    (void)impl;
 }

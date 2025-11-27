@@ -60,7 +60,7 @@ static uint8_t priskv_ucp_am_id_req = 1;
 static uint8_t priskv_ucp_am_id_resp = 2;
 static uint8_t priskv_ucp_am_id_info_req = 3;
 static uint8_t priskv_ucp_am_id_info_resp = 4;
-static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
+static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 static int send_am_req(priskv_client *client, const void *buf, size_t len);
 static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
                            uint64_t timeout, uint64_t request_id, size_t *out_len);
@@ -108,7 +108,7 @@ static void pend_remove(priskv_ucp_client_impl *impl, uint64_t id)
     impl->pendings = realloc(impl->pendings, impl->npending * sizeof(pending_req));
 }
 
-static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
+static ucs_status_t priskv_ucp_am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
     priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
     uint32_t recv_attr = param->recv_attr;
@@ -116,7 +116,7 @@ static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_leng
     uint8_t *msg = (uint8_t *)data;
     uint8_t *owned_buf = NULL;
     if (is_rndv) {
-        priskv_log_debug("UCP: recv am resp rndv, length %zu", length);
+        priskv_log_debug("priskv_ucp_am_resp_cb: recv am resp rndv, length %zu", length);
         owned_buf = (uint8_t *)malloc(length);
         if (!owned_buf) {
             priskv_log_error("UCP: recv am resp rndv, malloc failed");
@@ -140,7 +140,7 @@ static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_leng
     uint32_t len = be32toh(resp->length);
     pending_req *p = pend_find(impl, id);
     if (p) {
-        priskv_log_debug("UCP: recv am resp, id %lu, status %u, length %u", id, status, len);
+        priskv_log_debug("priskv_ucp_am_resp_cb: recv am resp, id %lu, status %u, length %u", id, status, len);
     }
     if (p && p->cb) {
         if (p->cmd == PRISKV_COMMAND_KEYS) {
@@ -271,7 +271,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
         hparam.id = priskv_ucp_am_id_resp;
         hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-        hparam.cb = am_resp_cb;
+        hparam.cb = priskv_ucp_am_resp_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
             ucp_worker_destroy(impl->worker);
@@ -284,7 +284,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
         hparam.id = priskv_ucp_am_id_resp + 512;
         hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-        hparam.cb = am_resp_cb;
+        hparam.cb = priskv_ucp_am_resp_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
             ucp_worker_destroy(impl->worker);
@@ -297,7 +297,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
         hparam.id = priskv_ucp_am_id_info_resp;
         hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-        hparam.cb = am_info_cb;
+        hparam.cb = priskv_ucp_am_info_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
             ucp_worker_destroy(impl->worker);
@@ -310,7 +310,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
         hparam.id = priskv_ucp_am_id_info_resp + 512;
         hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-        hparam.cb = am_info_cb;
+        hparam.cb = priskv_ucp_am_info_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
             ucp_worker_destroy(impl->worker);
@@ -398,7 +398,7 @@ int priskv_get_fd(priskv_client *client)
 int priskv_process(priskv_client *client, uint32_t event)
 {
     if (!client || !client->impl) return -ENOTCONN;
-    priskv_log_debug("UCP: process event %u", event);
+    priskv_log_debug("priskv_process: process event %u", event);
     ucs_status_t st;
     do {
         ucp_worker_progress(client->impl->worker);
@@ -607,7 +607,7 @@ uint64_t priskv_capacity(priskv_client *client)
     if (!client || !client->impl) return 0;
     return client->impl->capacity;
 }
-static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
+static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
     priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
     uint32_t recv_attr = param->recv_attr;
@@ -615,6 +615,7 @@ static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_leng
     uint8_t *msg = (uint8_t *)data;
     uint8_t *owned_buf = NULL;
     if (is_rndv) {
+        priskv_log_debug("priskv_ucp_am_info_cb: AM recv rndv data, length %zu", length);
         owned_buf = (uint8_t *)malloc(length);
         if (!owned_buf) return UCS_OK;
         ucp_request_param_t rp;
@@ -638,6 +639,8 @@ static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_leng
     impl->max_sgl = be16toh(info->max_sgl_be);
     impl->max_key_length = be16toh(info->max_key_length_be);
     impl->max_inflight_command = be16toh(info->max_inflight_command_be);
+    priskv_log_info("priskv_ucp_am_info_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16,
+                    impl->capacity, impl->max_sgl, impl->max_key_length, impl->max_inflight_command);
     if (is_rndv) {
         ucp_am_data_release(impl->worker, data);
     }

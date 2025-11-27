@@ -560,6 +560,21 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
             st = ucp_worker_arm(g_server.worker);
         } while (st == UCS_ERR_BUSY);
     }
+    {
+        char ip[64] = {0};
+        inet_ntop(AF_INET, &listen_addr.sin_addr, ip, sizeof(ip));
+        int lport = ntohs(listen_addr.sin_port);
+        const char *ver = ucp_get_version_string();
+        priskv_log_info("UCP: listen %s:%d, version %s", ip, lport, ver);
+        ucp_context_attr cattr;
+        memset(&cattr, 0, sizeof(cattr));
+        cattr.field_mask = UCP_ATTR_FIELD_REQUEST_SIZE | UCP_ATTR_FIELD_THREAD_MODE | UCP_ATTR_FIELD_MEMORY_TYPES | UCP_ATTR_FIELD_NAME;
+        if (ucp_context_query(g_server.context, &cattr) == UCS_OK) {
+            priskv_log_info("UCP: request_size %zu, thread_mode %d, memory_types 0x%lx", cattr.request_size, cattr.thread_mode, (unsigned long)cattr.memory_types);
+        }
+        priskv_log_info("UCP: features AM|RMA|TAG|WAKEUP, AM handlers req=%u info_req=%u resp=%u", priskv_ucp_am_id_req, priskv_ucp_am_id_info_req, priskv_ucp_am_id_resp);
+        ucp_context_print_info(g_server.context, stdout);
+    }
     return 0;
 }
 
@@ -687,6 +702,8 @@ static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, siz
     info.max_sgl_be = htobe16(g_server.default_cap.max_sgl);
     info.max_key_length_be = htobe16(g_server.default_cap.max_key_length);
     info.max_inflight_command_be = htobe16(g_server.default_cap.max_inflight_command);
+    priskv_log_info("am_info_req_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16,
+                    capacity, g_server.default_cap.max_sgl, g_server.default_cap.max_key_length, g_server.default_cap.max_inflight_command);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
     sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
@@ -701,9 +718,9 @@ static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, siz
 static void priskv_ucp_send_done(void *request, ucs_status_t status, void *user_data)
 {
     if (status != UCS_OK) {
-        priskv_log_error("UCP: send failed, status %s", ucs_status_string(status));
+        priskv_log_error("priskv_ucp_send_done: send failed, status %s", ucs_status_string(status));
     } else {
-        priskv_log_debug("UCP: send done");
+        priskv_log_debug("priskv_ucp_send_done: ok");
     }
 
     if (user_data) {

@@ -59,6 +59,7 @@ typedef struct pending_req {
 static uint8_t priskv_ucp_am_id_req = 1;
 static uint8_t priskv_ucp_am_id_resp = 2;
 static uint8_t priskv_ucp_am_id_info = 3;
+static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 static int send_am_req(priskv_client *client, const void *buf, size_t len);
 static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
                            uint64_t timeout, uint64_t request_id, size_t *out_len);
@@ -111,7 +112,6 @@ static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_leng
     uint32_t recv_attr = param->recv_attr;
     int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
     uint8_t *msg = (uint8_t *)data;
-    size_t msg_len = length;
     uint8_t *owned_buf = NULL;
     if (is_rndv) {
         owned_buf = (uint8_t *)malloc(length);

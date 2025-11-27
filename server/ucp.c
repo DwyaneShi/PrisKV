@@ -567,12 +567,6 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
         int lport = ntohs(listen_addr.sin_port);
         const char *ver = ucp_get_version_string();
         priskv_log_info("UCP: listen %s:%d, version %s", ip, lport, ver);
-        ucp_context_attr cattr;
-        memset(&cattr, 0, sizeof(cattr));
-        cattr.field_mask = UCP_ATTR_FIELD_REQUEST_SIZE | UCP_ATTR_FIELD_THREAD_MODE | UCP_ATTR_FIELD_MEMORY_TYPES | UCP_ATTR_FIELD_NAME;
-        if (ucp_context_query(g_server.context, &cattr) == UCS_OK) {
-            priskv_log_info("UCP: request_size %zu, thread_mode %d", cattr.request_size, cattr.thread_mode);
-        }
         priskv_log_info("UCP: features AM|RMA|TAG|WAKEUP, AM handlers req=%u info_req=%u resp=%u", priskv_ucp_am_id_req, priskv_ucp_am_id_info_req, priskv_ucp_am_id_resp);
         ucp_context_print_info(g_server.context, stdout);
     }

@@ -32,7 +32,6 @@
 #include "list.h"
 #include "backend.h"
 #include "priskv-log.h"
-#include "kv.h"
 
 static struct list_head global_bdrv_list = LIST_HEAD_INIT(global_bdrv_list);
 

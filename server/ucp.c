@@ -125,7 +125,7 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
     if (is_rndv) {
         owned_buf = (uint8_t *)malloc(length);
         if (!owned_buf) {
-            priskv_log_error("UCP: no mem to receive RNDV data, length %zu", length);
+            priskv_log_error("am_req_cb: no mem to receive RNDV data, length %zu\n", length);
             ucp_am_data_release(g_server.worker, data);
             return UCS_OK;
         }
@@ -145,7 +145,7 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
 
     ucp_ep_h reply_ep = param->reply_ep;
     if (!reply_ep) {
-        priskv_log_error("UCP: reply_ep is NULL, recv_attr 0x%x; cannot respond", recv_attr);
+        priskv_log_error("am_req_cb: reply_ep is NULL, recv_attr 0x%x; cannot respond\n", recv_attr);
         if (is_rndv) {
             ucp_am_data_release(g_server.worker, data);
         }
@@ -407,7 +407,7 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
         break;
     }
     default:
-        priskv_log_error("UCP: unknown command %d", req->command);
+        priskv_log_error("am_req_cb: unknown command %d\n", req->command);
         resp->status = htobe16(PRISKV_RESP_STATUS_NO_SUCH_COMMAND);
         resp->length = htobe32(0);
         break;
@@ -479,7 +479,7 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     status = ucp_init(&params, config, &g_server.context);
     ucp_config_release(config);
     if (status != UCS_OK) {
-        priskv_log_error("UCP: failed to initialize context, status %s", ucs_status_string(status));
+        priskv_log_error("priskv_ucp_listen: failed to initialize context, status %s\n", ucs_status_string(status));
         return -1;
     }
 
@@ -489,7 +489,7 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     wparams.thread_mode = UCS_THREAD_MODE_SINGLE;
     status = ucp_worker_create(g_server.context, &wparams, &g_server.worker);
     if (status != UCS_OK) {
-        priskv_log_error("UCP: failed to create worker, status %s", ucs_status_string(status));
+        priskv_log_error("priskv_ucp_listen: failed to create worker, status %s\n", ucs_status_string(status));
         return -1;
     }
 
@@ -503,7 +503,7 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     hparam.arg = NULL;
     status = ucp_worker_set_am_recv_handler(g_server.worker, &hparam);
     if (status != UCS_OK) {
-        priskv_log_error("UCP: failed to set AM recv handler, status %s", ucs_status_string(status));
+        priskv_log_error("priskv_ucp_listen: failed to set AM recv handler, status %s\n", ucs_status_string(status));
         return -1;
     }
 
@@ -516,7 +516,7 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     hparam.arg = NULL;
     status = ucp_worker_set_am_recv_handler(g_server.worker, &hparam);
     if (status != UCS_OK) {
-        priskv_log_error("UCP: failed to set AM info handler, status %s", ucs_status_string(status));
+        priskv_log_error("priskv_ucp_listen: failed to set AM info handler, status %s\n", ucs_status_string(status));
         return -1;
     }
 
@@ -539,7 +539,7 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     lparams.conn_handler.arg = NULL;
     status = ucp_listener_create(g_server.worker, &lparams, &g_server.listener);
     if (status != UCS_OK) {
-        priskv_log_error("UCP: failed to create listener, status %s", ucs_status_string(status));
+        priskv_log_error("priskv_ucp_listen: failed to create listener, status %s\n", ucs_status_string(status));
         return -1;
     }
 
@@ -566,8 +566,8 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
         inet_ntop(AF_INET, &listen_addr.sin_addr, ip, sizeof(ip));
         int lport = ntohs(listen_addr.sin_port);
         const char *ver = ucp_get_version_string();
-        priskv_log_info("UCP: listen %s:%d, version %s", ip, lport, ver);
-        priskv_log_info("UCP: features AM|RMA|TAG|WAKEUP, AM handlers req=%u info_req=%u resp=%u", priskv_ucp_am_id_req, priskv_ucp_am_id_info_req, priskv_ucp_am_id_resp);
+        priskv_log_info("UCP: listen on %s:%d, version %s\n", ip, lport, ver);
+        priskv_log_info("UCP: features AM|RMA|TAG|WAKEUP, AM handlers req=%u info_req=%u resp=%u\n", priskv_ucp_am_id_req, priskv_ucp_am_id_info_req, priskv_ucp_am_id_resp);
         ucp_context_print_info(g_server.context, stdout);
     }
     return 0;
@@ -697,7 +697,7 @@ static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, siz
     info.max_sgl_be = htobe16(g_server.default_cap.max_sgl);
     info.max_key_length_be = htobe16(g_server.default_cap.max_key_length);
     info.max_inflight_command_be = htobe16(g_server.default_cap.max_inflight_command);
-    priskv_log_info("am_info_req_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16,
+    priskv_log_info("am_info_req_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16 "\n",
                     capacity, g_server.default_cap.max_sgl, g_server.default_cap.max_key_length, g_server.default_cap.max_inflight_command);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
@@ -713,9 +713,9 @@ static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, siz
 static void priskv_ucp_send_done(void *request, ucs_status_t status, void *user_data)
 {
     if (status != UCS_OK) {
-        priskv_log_error("priskv_ucp_send_done: send failed, status %s", ucs_status_string(status));
+        priskv_log_error("priskv_ucp_send_done: send failed, status %s\n", ucs_status_string(status));
     } else {
-        priskv_log_debug("priskv_ucp_send_done: ok");
+        priskv_log_debug("priskv_ucp_send_done: ok\n");
     }
 
     if (user_data) {

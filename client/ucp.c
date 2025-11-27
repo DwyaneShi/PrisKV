@@ -129,7 +129,6 @@ static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_leng
             ucp_request_free(r);
         }
         msg = owned_buf;
-        msg_len = length;
     }
     priskv_response *resp = (priskv_response *)msg;
     uint64_t id = be64toh(resp->request_id);

@@ -76,6 +76,8 @@ typedef struct ucp_rma_seg {
     uint32_t length;
 } ucp_rma_seg;
 
+static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
+
 static void ucp_destroy_segs(ucp_rma_seg *segs, uint16_t n)
 {
     if (!segs) return;

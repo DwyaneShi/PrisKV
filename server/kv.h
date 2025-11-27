@@ -38,7 +38,7 @@ extern "C"
 #include "priskv-protocol.h"
 #include "backend/backend.h"
 
-typedef struct priskv_ucp_conn priskv_ucp_conn;
+typedef struct priskv_transport_conn priskv_transport_conn;
 
 #define PRISKV_KV_DEFAULT_EXPIRE_ROUTINE_INTERVAL 600
 
@@ -107,6 +107,8 @@ typedef struct priskv_tiering_req {
     void *kv;
     priskv_request *req;
     uint64_t request_id;
+    priskv_transport_conn *conn;
+    void *transport_ep;
 
     /* kv operation context */
     uint8_t *key;
@@ -129,6 +131,10 @@ typedef struct priskv_tiering_req {
 } priskv_tiering_req;
 
 int priskv_backend_req_resubmit(void *req);
+struct priskv_tiering_req *priskv_tiering_req_new(priskv_transport_conn *conn, priskv_request *req,
+                                                  uint8_t *key, uint16_t keylen, uint64_t timeout,
+                                                  priskv_req_command cmd, uint32_t remote_valuelen,
+                                                  priskv_resp_status *resp_status);
 
 // tiering concurrency control
 bool priskv_key_serialize_enter(struct priskv_tiering_req *treq);

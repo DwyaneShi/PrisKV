@@ -14,6 +14,7 @@
 #include "priskv-event.h"
 #include "memory.h"
 #include "kv.h"
+#include "backend/backend.h"
 #include "ucp.h"
 
 typedef struct priskv_ucp_mem {
@@ -51,6 +52,8 @@ typedef struct priskv_ucp_server {
 static priskv_ucp_server g_server = {
     .epollfd = -1,
 };
+
+priskv_threadpool *g_threadpool;
 
 uint32_t g_slow_query_threshold_latency_us = SLOW_QUERY_THRESHOLD_LATENCY_US;
 
@@ -119,88 +122,140 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
     memset(&rparam, 0, sizeof(rparam));
     switch (command) {
     case PRISKV_COMMAND_GET: {
-        int rc = priskv_get_key(g_server.kv, keyptr, keylen, &value_ptr, &valuelen, &keynode);
-        if (rc != PRISKV_RESP_STATUS_OK) {
-            resp.status = htobe16(rc);
-            resp.length = htobe32(0);
-            goto send_resp;
-        }
-        if (total_len < valuelen) {
-            resp.status = htobe16(PRISKV_RESP_STATUS_VALUE_TOO_BIG);
-            resp.length = htobe32(valuelen);
-            priskv_get_key_end(keynode);
-            goto send_resp;
-        }
-        segs = ucp_unpack_segs(reply_ep, req, keyptr);
-        if (!segs) {
-            resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
-            resp.length = htobe32(0);
-            priskv_get_key_end(keynode);
-            goto send_resp;
-        }
-        uint64_t off = 0;
-        for (uint16_t i = 0; i < nsgl; i++) {
-            size_t len = segs[i].length;
-            void *r = ucp_put_nbx(reply_ep, value_ptr + off, len, segs[i].addr, segs[i].rkey, &rparam);
-            if (UCS_PTR_IS_PTR(r)) {
-                while (ucp_request_check_status(r) == UCS_INPROGRESS) {
-                    ucp_worker_progress(g_server.worker);
-                }
-                ucp_request_free(r);
+        if (priskv_backend_tiering_enabled()) {
+            priskv_resp_status rs;
+            priskv_tiering_req *treq = priskv_tiering_req_new(NULL, req, keyptr, keylen, be64toh(req->timeout), PRISKV_COMMAND_GET, total_len, &rs);
+            if (!treq) {
+                resp.status = htobe16(rs);
+                resp.length = htobe32(0);
+                goto send_resp;
             }
-            off += len;
+            treq->transport_ep = reply_ep;
+            priskv_backend_req_resubmit(treq);
+            return UCS_OK;
+        } else {
+            int rc = priskv_get_key(g_server.kv, keyptr, keylen, &value_ptr, &valuelen, &keynode);
+            if (rc != PRISKV_RESP_STATUS_OK) {
+                resp.status = htobe16(rc);
+                resp.length = htobe32(0);
+                goto send_resp;
+            }
+            if (total_len < valuelen) {
+                resp.status = htobe16(PRISKV_RESP_STATUS_VALUE_TOO_BIG);
+                resp.length = htobe32(valuelen);
+                priskv_get_key_end(keynode);
+                goto send_resp;
+            }
+            segs = ucp_unpack_segs(reply_ep, req, keyptr);
+            if (!segs) {
+                resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
+                resp.length = htobe32(0);
+                priskv_get_key_end(keynode);
+                goto send_resp;
+            }
+            uint64_t off = 0;
+            for (uint16_t i = 0; i < nsgl; i++) {
+                size_t len = segs[i].length;
+                void *r = ucp_put_nbx(reply_ep, value_ptr + off, len, segs[i].addr, segs[i].rkey, &rparam);
+                if (UCS_PTR_IS_PTR(r)) {
+                    while (ucp_request_check_status(r) == UCS_INPROGRESS) {
+                        ucp_worker_progress(g_server.worker);
+                    }
+                    ucp_request_free(r);
+                }
+                off += len;
+            }
+            priskv_get_key_end(keynode);
+            resp.length = htobe32(valuelen);
+            break;
         }
-        priskv_get_key_end(keynode);
-        resp.length = htobe32(valuelen);
-        break;
     }
     case PRISKV_COMMAND_SET: {
-        segs = ucp_unpack_segs(reply_ep, req, keyptr);
-        if (!segs) {
-            resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
-            resp.length = htobe32(0);
-            goto send_resp;
-        }
-        uint8_t *dst = NULL;
-        int rc = priskv_set_key(g_server.kv, keyptr, keylen, &dst, total_len, be64toh(req->timeout), &keynode);
-        if (rc != PRISKV_RESP_STATUS_OK || !keynode) {
-            resp.status = htobe16(rc);
-            resp.length = htobe32(0);
-            goto send_resp;
-        }
-        uint64_t off = 0;
-        for (uint16_t i = 0; i < nsgl; i++) {
-            size_t len = segs[i].length;
-            void *r = ucp_get_nbx(reply_ep, dst + off, len, segs[i].addr, segs[i].rkey, &rparam);
-            if (UCS_PTR_IS_PTR(r)) {
-                while (ucp_request_check_status(r) == UCS_INPROGRESS) {
-                    ucp_worker_progress(g_server.worker);
-                }
-                ucp_request_free(r);
+        if (priskv_backend_tiering_enabled()) {
+            priskv_resp_status rs;
+            priskv_tiering_req *treq = priskv_tiering_req_new(NULL, req, keyptr, keylen, be64toh(req->timeout), PRISKV_COMMAND_SET, total_len, &rs);
+            if (!treq) {
+                resp.status = htobe16(rs);
+                resp.length = htobe32(0);
+                goto send_resp;
             }
-            off += len;
+            treq->transport_ep = reply_ep;
+            priskv_backend_req_resubmit(treq);
+            return UCS_OK;
+        } else {
+            segs = ucp_unpack_segs(reply_ep, req, keyptr);
+            if (!segs) {
+                resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
+                resp.length = htobe32(0);
+                goto send_resp;
+            }
+            uint8_t *dst = NULL;
+            int rc = priskv_set_key(g_server.kv, keyptr, keylen, &dst, total_len, be64toh(req->timeout), &keynode);
+            if (rc != PRISKV_RESP_STATUS_OK || !keynode) {
+                resp.status = htobe16(rc);
+                resp.length = htobe32(0);
+                goto send_resp;
+            }
+            uint64_t off = 0;
+            for (uint16_t i = 0; i < nsgl; i++) {
+                size_t len = segs[i].length;
+                void *r = ucp_get_nbx(reply_ep, dst + off, len, segs[i].addr, segs[i].rkey, &rparam);
+                if (UCS_PTR_IS_PTR(r)) {
+                    while (ucp_request_check_status(r) == UCS_INPROGRESS) {
+                        ucp_worker_progress(g_server.worker);
+                    }
+                    ucp_request_free(r);
+                }
+                off += len;
+            }
+            priskv_set_key_end(keynode);
+            resp.length = htobe32(total_len);
+            break;
         }
-        priskv_set_key_end(keynode);
-        resp.length = htobe32(total_len);
-        break;
     }
     case PRISKV_COMMAND_DELETE: {
-        int rc = priskv_delete_key(g_server.kv, keyptr, keylen);
-        resp.status = htobe16(rc);
-        resp.length = htobe32(0);
-        break;
-    }
-    case PRISKV_COMMAND_TEST: {
-        int rc = priskv_get_key(g_server.kv, keyptr, keylen, &value_ptr, &valuelen, &keynode);
-        if (rc != PRISKV_RESP_STATUS_OK) {
+        if (priskv_backend_tiering_enabled()) {
+            priskv_resp_status rs;
+            priskv_tiering_req *treq = priskv_tiering_req_new(NULL, req, keyptr, keylen, 0, PRISKV_COMMAND_DELETE, 0, &rs);
+            if (!treq) {
+                resp.status = htobe16(rs);
+                resp.length = htobe32(0);
+                goto send_resp;
+            }
+            treq->transport_ep = reply_ep;
+            priskv_backend_req_resubmit(treq);
+            return UCS_OK;
+        } else {
+            int rc = priskv_delete_key(g_server.kv, keyptr, keylen);
             resp.status = htobe16(rc);
             resp.length = htobe32(0);
-        } else {
-            priskv_get_key_end(keynode);
-            resp.status = htobe16(PRISKV_RESP_STATUS_OK);
-            resp.length = htobe32(valuelen);
+            break;
         }
-        break;
+    }
+    case PRISKV_COMMAND_TEST: {
+        if (priskv_backend_tiering_enabled()) {
+            priskv_resp_status rs;
+            priskv_tiering_req *treq = priskv_tiering_req_new(NULL, req, keyptr, keylen, 0, PRISKV_COMMAND_TEST, 0, &rs);
+            if (!treq) {
+                resp.status = htobe16(rs);
+                resp.length = htobe32(0);
+                goto send_resp;
+            }
+            treq->transport_ep = reply_ep;
+            priskv_backend_req_resubmit(treq);
+            return UCS_OK;
+        } else {
+            int rc = priskv_get_key(g_server.kv, keyptr, keylen, &value_ptr, &valuelen, &keynode);
+            if (rc != PRISKV_RESP_STATUS_OK) {
+                resp.status = htobe16(rc);
+                resp.length = htobe32(0);
+            } else {
+                priskv_get_key_end(keynode);
+                resp.status = htobe16(PRISKV_RESP_STATUS_OK);
+                resp.length = htobe32(valuelen);
+            }
+            break;
+        }
     }
     case PRISKV_COMMAND_EXPIRE: {
         int rc = priskv_expire_key(g_server.kv, keyptr, keylen, be64toh(req->timeout));

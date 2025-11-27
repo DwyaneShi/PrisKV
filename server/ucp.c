@@ -47,7 +47,6 @@ static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep);
 static void priskv_ucp_conn_add(ucp_ep_h ep);
 static void priskv_ucp_conn_remove(ucp_ep_h ep);
 static void priskv_ucp_ep_err_cb(ucp_ep_h ep, ucs_status_t status, void *arg);
-static void priskv_ucp_listener_accept_cb(ucp_ep_h ep, void *arg);
 static void priskv_ucp_send_done(void *request, ucs_status_t status);
 
 typedef struct priskv_ucp_server {

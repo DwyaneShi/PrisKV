@@ -46,7 +46,7 @@ typedef struct priskv_ucp_conn {
 static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep);
 static void priskv_ucp_conn_add(ucp_ep_h ep);
 static void priskv_ucp_conn_remove(ucp_ep_h ep);
-static void priskv_ucp_ep_err_cb(ucp_ep_h ep, ucs_status_t status, void *arg);
+static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
 static void priskv_ucp_send_done(void *request, ucs_status_t status);
 
 typedef struct priskv_ucp_server {
@@ -117,7 +117,6 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
 {
     uint32_t recv_attr = param->recv_attr;
     int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
-    int is_data = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_DATA);
     uint8_t *msg = (uint8_t *)data;
     size_t msg_len = length;
     uint8_t *owned_buf = NULL;
@@ -428,7 +427,7 @@ send_resp:
     return UCS_OK;
 }
 
-static void priskv_ucp_listener_conn_cb(ucp_listener_h listener, void *arg, const ucp_conn_request_h request)
+static void priskv_ucp_listener_conn_cb(const ucp_conn_request_h request, void *arg)
 {
     ucp_ep_params_t ep_params;
     memset(&ep_params, 0, sizeof(ep_params));
@@ -663,7 +662,7 @@ static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, siz
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
     sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
-    sp.cb = priskv_ucp_send_done;
+    sp.cb.send = priskv_ucp_send_done;
     (void)ucp_am_send_nbx(ep, priskv_ucp_am_id_info_resp, NULL, 0, &info, sizeof(info), &sp);
     if (is_rndv) {
         ucp_am_data_release(g_server.worker, data);
@@ -676,7 +675,7 @@ static void priskv_ucp_send_done(void *request, ucs_status_t status)
         ucp_request_free(request);
     }
 }
-static void priskv_ucp_ep_err_cb(ucp_ep_h ep, ucs_status_t status, void *a)
+static void priskv_ucp_ep_err_cb(void *a, ucp_ep_h ep, ucs_status_t status)
 {
     ucp_request_param_t p;
     memset(&p, 0, sizeof(p));

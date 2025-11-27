@@ -64,7 +64,7 @@ static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_leng
 static int send_am_req(priskv_client *client, const void *buf, size_t len);
 static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
                            uint64_t timeout, uint64_t request_id, size_t *out_len);
-static void priskv_client_ep_err_cb(ucp_ep_h ep, ucs_status_t status, void *arg);
+static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
 
 static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
 {
@@ -603,7 +603,7 @@ static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_leng
     if (owned_buf) free(owned_buf);
     return UCS_OK;
 }
-static void priskv_client_ep_err_cb(ucp_ep_h ep, ucs_status_t status, void *arg)
+static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
 {
     priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
     ucp_request_param_t p;

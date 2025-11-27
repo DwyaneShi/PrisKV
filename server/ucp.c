@@ -47,7 +47,6 @@ static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep);
 static void priskv_ucp_conn_add(ucp_ep_h ep);
 static void priskv_ucp_conn_remove(ucp_ep_h ep);
 static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
-static ucs_status_t priskv_ucp_am_req_cb_compat(void *arg, void *data, size_t length, ucp_ep_h ep, unsigned flags);
 static void priskv_ucp_listener_accept_cb(ucp_ep_h ep, void *arg);
 
 typedef struct priskv_ucp_server {
@@ -387,14 +386,6 @@ send_resp:
     }
     return UCS_OK;
 }
-static ucs_status_t priskv_ucp_am_req_cb_compat(void *arg, void *data, size_t length, ucp_ep_h ep, unsigned flags)
-{
-    ucp_am_recv_param_t p;
-    memset(&p, 0, sizeof(p));
-    p.reply_ep = ep;
-    p.recv_attr = flags;
-    return priskv_ucp_am_req_cb(arg, NULL, 0, data, length, &p);
-}
 
 static void priskv_ucp_listener_accept_cb(ucp_ep_h ep, void *arg)
 {
@@ -435,8 +426,19 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
         return -1;
     }
 
-    ucp_worker_set_am_handler(g_server.worker, priskv_ucp_am_id_req, priskv_ucp_am_req_cb_compat, NULL,
-                              UCP_AM_FLAG_WHOLE_MSG);
+    ucp_am_handler_param_t hparam;
+    memset(&hparam, 0, sizeof(hparam));
+    hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
+                        UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
+    hparam.id = priskv_ucp_am_id_req;
+    hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
+    hparam.cb = priskv_ucp_am_req_cb;
+    hparam.arg = NULL;
+    status = ucp_worker_set_am_recv_handler(g_server.worker, &hparam);
+    if (status != UCS_OK) {
+        priskv_log_error("UCP: failed to set AM recv handler, status %s", ucs_status_string(status));
+        return -1;
+    }
 
     struct sockaddr_in listen_addr;
     memset(&listen_addr, 0, sizeof(listen_addr));

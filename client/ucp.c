@@ -298,7 +298,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
 
     ucp_ep_params_t ep_params;
     memset(&ep_params, 0, sizeof(ep_params));
-    ep_params.field_mask = UCP_EP_PARAM_FIELD_FLAGS | UCP_EP_PARAM_FIELD_SOCK_ADDR | UCP_EP_PARAM_FIELD_ERR_HANDLER | UCP_EP_PARAM_FIELD_ERR_HANDLER_ARG;
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_FLAGS | UCP_EP_PARAM_FIELD_SOCK_ADDR | UCP_EP_PARAM_FIELD_ERR_HANDLER;
     ep_params.flags = UCP_EP_PARAMS_FLAGS_CLIENT_SERVER;
     ep_params.sockaddr.addr = (const struct sockaddr *)&dst;
     ep_params.sockaddr.addrlen = sizeof(dst);
@@ -603,7 +603,7 @@ static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_leng
     if (owned_buf) free(owned_buf);
     return UCS_OK;
 }
-static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
+static void priskv_client_ep_err_cb(ucp_ep_h ep, ucs_status_t status, void *arg)
 {
     priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
     ucp_request_param_t p;

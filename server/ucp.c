@@ -19,6 +19,13 @@
 #include "ucp.h"
 #include "uthash.h"
 
+static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep);
+static void priskv_ucp_conn_add(ucp_ep_h ep);
+static void priskv_ucp_conn_remove(ucp_ep_h ep);
+static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
+static ucs_status_t priskv_ucp_am_req_cb_compat(void *arg, void *data, size_t length, ucp_ep_h ep, unsigned flags);
+static void priskv_ucp_listener_accept_cb(ucp_ep_h ep, void *arg);
+
 typedef struct priskv_ucp_mem {
     char name[32];
     uint8_t *buf;
@@ -514,12 +521,7 @@ typedef struct ucp_conn_entry {
 } ucp_conn_entry;
 
 static ucp_conn_entry *g_conn_map = NULL;
-static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep);
-static void priskv_ucp_conn_add(ucp_ep_h ep);
-static void priskv_ucp_conn_remove(ucp_ep_h ep);
-static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
-static ucs_status_t priskv_ucp_am_req_cb_compat(void *arg, void *data, size_t length, ucp_ep_h ep, unsigned flags);
-static void priskv_ucp_listener_accept_cb(ucp_ep_h ep, void *arg);
+/* moved to header section */
 
 static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep)
 {

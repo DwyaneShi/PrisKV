@@ -113,6 +113,13 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
 {
     priskv_request *req = (priskv_request *)data;
     ucp_ep_h reply_ep = param->reply_ep;
+    if (!reply_ep) {
+        priskv_log_error("UCP: reply_ep is NULL, recv_attr 0x%x; cannot respond", param->recv_attr);
+        if (!(param->recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV)) {
+            ucp_am_data_release(g_server.worker, data);
+        }
+        return UCS_OK;
+    }
     uint16_t nsgl = be16toh(req->nsgl);
     uint16_t keylen = be16toh(req->key_length);
     uint64_t request_id = be64toh(req->request_id);

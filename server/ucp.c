@@ -411,11 +411,35 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
     }
 send_resp:
     if (segs) ucp_destroy_segs(segs, nsgl);
-    ucp_request_param_t sp;
-    memset(&sp, 0, sizeof(sp));
-    sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
-    sp.cb.send = priskv_ucp_send_done;
-    (void)ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
+    {
+        priskv_response *resp_dyn = malloc(sizeof(*resp_dyn));
+        if (resp_dyn) {
+            memcpy(resp_dyn, &resp, sizeof(resp));
+            ucp_request_param_t sp;
+            memset(&sp, 0, sizeof(sp));
+            sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
+            sp.cb.send = priskv_ucp_send_done;
+            sp.user_data = resp_dyn;
+            void *r = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, resp_dyn, sizeof(*resp_dyn), &sp);
+            if (UCS_PTR_IS_ERR(r)) {
+                free(resp_dyn);
+            } else if (!UCS_PTR_IS_PTR(r)) {
+                free(resp_dyn);
+            }
+        } else {
+            ucp_request_param_t sp2;
+            memset(&sp2, 0, sizeof(sp2));
+            void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp2);
+            if (UCS_PTR_IS_ERR(sr)) {
+                
+            } else if (UCS_PTR_IS_PTR(sr)) {
+                while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
+                    ucp_worker_progress(g_server.worker);
+                }
+                ucp_request_free(sr);
+            }
+        }
+    }
     if (is_rndv) {
         ucp_am_data_release(g_server.worker, data);
     }

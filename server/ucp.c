@@ -315,8 +315,8 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
             priskv_resp_status rs;
             priskv_tiering_req *treq = priskv_tiering_req_new(NULL, req, keyptr, keylen, 0, PRISKV_COMMAND_TEST, 0, &rs);
             if (!treq) {
-                resp.status = htobe16(rs);
-                resp.length = htobe32(0);
+                resp->status = htobe16(rs);
+                resp->length = htobe32(0);
                 goto send_resp;
             }
             treq->transport_ep = reply_ep;
@@ -369,8 +369,8 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
         uint32_t reallen = 0;
         uint8_t *keysbuf = malloc(segs[0].length);
         if (!keysbuf) {
-            resp.status = htobe16(PRISKV_RESP_STATUS_NO_MEM);
-            resp.length = htobe32(0);
+            resp->status = htobe16(PRISKV_RESP_STATUS_NO_MEM);
+            resp->length = htobe32(0);
             break;
         }
         rc = priskv_get_keys(g_server.kv, keyptr, keylen, keysbuf, segs[0].length, &reallen, &nkey);
@@ -387,8 +387,8 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
         mparams.length = reallen;
         ucp_mem_h memh;
         if (ucp_mem_map(g_server.context, &mparams, &memh) != UCS_OK) {
-            resp.status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
-            resp.length = htobe32(0);
+            resp->status = htobe16(PRISKV_RESP_STATUS_SERVER_ERROR);
+            resp->length = htobe32(0);
             free(keysbuf);
             break;
         }

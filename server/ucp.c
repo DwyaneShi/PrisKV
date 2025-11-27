@@ -70,7 +70,6 @@ static uint8_t priskv_ucp_am_id_req = 1;
 static uint8_t priskv_ucp_am_id_resp = 2;
 static uint8_t priskv_ucp_am_id_info_req = 3;
 static uint8_t priskv_ucp_am_id_info_resp = 4;
-static const unsigned PRISKV_UCP_AM_REPLY_ID_OFFSET = 512;
 
 typedef struct ucp_rma_seg {
     ucp_rkey_h rkey;
@@ -414,13 +413,9 @@ send_resp:
     if (segs) ucp_destroy_segs(segs, nsgl);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
-    if (UCS_PTR_IS_PTR(sr)) {
-        while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
-            ucp_worker_progress(g_server.worker);
-        }
-        ucp_request_free(sr);
-    }
+    sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
+    sp.cb.send = priskv_ucp_send_done;
+    (void)ucp_am_send_nbx(reply_ep, priskv_ucp_am_id_resp, NULL, 0, &resp, sizeof(resp), &sp);
     if (is_rndv) {
         ucp_am_data_release(g_server.worker, data);
     }
@@ -490,18 +485,6 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
         priskv_log_error("UCP: failed to set AM recv handler, status %s", ucs_status_string(status));
         return -1;
     }
-    memset(&hparam, 0, sizeof(hparam));
-    hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
-                        UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
-    hparam.id = priskv_ucp_am_id_req + PRISKV_UCP_AM_REPLY_ID_OFFSET;
-    hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-    hparam.cb = priskv_ucp_am_req_cb;
-    hparam.arg = NULL;
-    status = ucp_worker_set_am_recv_handler(g_server.worker, &hparam);
-    if (status != UCS_OK) {
-        priskv_log_error("UCP: failed to set AM recv handler(reply id), status %s", ucs_status_string(status));
-        return -1;
-    }
 
     memset(&hparam, 0, sizeof(hparam));
     hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
@@ -513,18 +496,6 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     status = ucp_worker_set_am_recv_handler(g_server.worker, &hparam);
     if (status != UCS_OK) {
         priskv_log_error("UCP: failed to set AM info handler, status %s", ucs_status_string(status));
-        return -1;
-    }
-    memset(&hparam, 0, sizeof(hparam));
-    hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
-                        UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
-    hparam.id = priskv_ucp_am_id_info_req + PRISKV_UCP_AM_REPLY_ID_OFFSET;
-    hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-    hparam.cb = priskv_ucp_am_info_req_cb;
-    hparam.arg = NULL;
-    status = ucp_worker_set_am_recv_handler(g_server.worker, &hparam);
-    if (status != UCS_OK) {
-        priskv_log_error("UCP: failed to set AM info handler(reply id), status %s", ucs_status_string(status));
         return -1;
     }
 

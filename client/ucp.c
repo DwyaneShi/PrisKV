@@ -58,7 +58,8 @@ typedef struct pending_req {
 
 static uint8_t priskv_ucp_am_id_req = 1;
 static uint8_t priskv_ucp_am_id_resp = 2;
-static uint8_t priskv_ucp_am_id_info = 3;
+static uint8_t priskv_ucp_am_id_info_req = 3;
+static uint8_t priskv_ucp_am_id_info_resp = 4;
 static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 static int send_am_req(priskv_client *client, const void *buf, size_t len);
 static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
@@ -275,7 +276,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         }
         memset(&hparam, 0, sizeof(hparam));
         hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
-        hparam.id = priskv_ucp_am_id_info;
+        hparam.id = priskv_ucp_am_id_info_resp;
         hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
         hparam.cb = am_info_cb;
         hparam.arg = impl;
@@ -319,7 +320,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FIELD_FLAGS;
         p.memory_type = UCS_MEMORY_TYPE_HOST;
         p.flags = UCP_AM_SEND_FLAG_REPLY;
-        void *r = ucp_am_send_nbx(impl->ep, priskv_ucp_am_id_info, NULL, 0, NULL, 0, &p);
+        void *r = ucp_am_send_nbx(impl->ep, priskv_ucp_am_id_info_req, NULL, 0, NULL, 0, &p);
         if (UCS_PTR_IS_PTR(r)) {
             int spins = 1000;
             while (ucp_request_check_status(r) == UCS_INPROGRESS && spins-- > 0) {

@@ -68,7 +68,8 @@ uint32_t g_slow_query_threshold_latency_us = SLOW_QUERY_THRESHOLD_LATENCY_US;
 
 static uint8_t priskv_ucp_am_id_req = 1;
 static uint8_t priskv_ucp_am_id_resp = 2;
-static uint8_t priskv_ucp_am_id_info = 3;
+static uint8_t priskv_ucp_am_id_info_req = 3;
+static uint8_t priskv_ucp_am_id_info_resp = 4;
 
 typedef struct ucp_rma_seg {
     ucp_rkey_h rkey;
@@ -483,9 +484,9 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     memset(&hparam, 0, sizeof(hparam));
     hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS |
                         UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
-    hparam.id = priskv_ucp_am_id_info;
+    hparam.id = priskv_ucp_am_id_info_req;
     hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-    hparam.cb = priskv_ucp_am_info_cb;
+    hparam.cb = priskv_ucp_am_info_req_cb;
     hparam.arg = NULL;
     status = ucp_worker_set_am_recv_handler(g_server.worker, &hparam);
     if (status != UCS_OK) {
@@ -642,7 +643,7 @@ static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
     }
     priskv_ucp_conn_remove(ep);
 }
-static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
+static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
     ucp_ep_h ep = param->reply_ep;
     uint32_t recv_attr = param->recv_attr;
@@ -666,7 +667,7 @@ static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t 
     info.max_inflight_command_be = htobe16(g_server.default_cap.max_inflight_command);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(ep, priskv_ucp_am_id_info, NULL, 0, &info, sizeof(info), &sp);
+    void *sr = ucp_am_send_nbx(ep, priskv_ucp_am_id_info_resp, NULL, 0, &info, sizeof(info), &sp);
     if (UCS_PTR_IS_PTR(sr)) {
         while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
             ucp_worker_progress(g_server.worker);

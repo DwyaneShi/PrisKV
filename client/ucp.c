@@ -116,8 +116,10 @@ static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_leng
     uint8_t *msg = (uint8_t *)data;
     uint8_t *owned_buf = NULL;
     if (is_rndv) {
+        priskv_log_debug("UCP: recv am resp rndv, length %zu", length);
         owned_buf = (uint8_t *)malloc(length);
         if (!owned_buf) {
+            priskv_log_error("UCP: recv am resp rndv, malloc failed");
             return UCS_OK;
         }
         ucp_request_param_t rp;
@@ -137,6 +139,9 @@ static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_leng
     uint16_t status = be16toh(resp->status);
     uint32_t len = be32toh(resp->length);
     pending_req *p = pend_find(impl, id);
+    if (p) {
+        priskv_log_debug("UCP: recv am resp, id %lu, status %u, length %u", id, status, len);
+    }
     if (p && p->cb) {
         if (p->cmd == PRISKV_COMMAND_KEYS) {
             if (status == PRISKV_RESP_STATUS_VALUE_TOO_BIG) {

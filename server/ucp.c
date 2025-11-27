@@ -667,15 +667,17 @@ static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, siz
     info.max_inflight_command_be = htobe16(g_server.default_cap.max_inflight_command);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(ep, priskv_ucp_am_id_info_resp, NULL, 0, &info, sizeof(info), &sp);
-    if (UCS_PTR_IS_PTR(sr)) {
-        while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
-            ucp_worker_progress(g_server.worker);
-        }
-        ucp_request_free(sr);
-    }
+    sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
+    sp.cb = priskv_ucp_send_done;
+    (void)ucp_am_send_nbx(ep, priskv_ucp_am_id_info_resp, NULL, 0, &info, sizeof(info), &sp);
     if (is_rndv) {
         ucp_am_data_release(g_server.worker, data);
     }
     return UCS_OK;
+}
+static void priskv_ucp_send_done(void *request, ucs_status_t status)
+{
+    if (request) {
+        ucp_request_free(request);
+    }
 }

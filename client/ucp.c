@@ -22,6 +22,10 @@ typedef struct priskv_ucp_client_impl {
     size_t keys_buf_len;
     priskv_memory *keys_mem;
     struct priskv_client *owner;
+    uint64_t capacity;
+    uint16_t max_sgl;
+    uint16_t max_key_length;
+    uint16_t max_inflight_command;
 } priskv_ucp_client_impl;
 
 struct priskv_client {
@@ -49,15 +53,17 @@ typedef struct pending_req {
     uint16_t nsgl;
     char *str;
     uint64_t timeout;
+    priskv_memory **auto_mems;
 } pending_req;
 
 static uint8_t priskv_ucp_am_id_req = 1;
 static uint8_t priskv_ucp_am_id_resp = 2;
+static uint8_t priskv_ucp_am_id_info = 3;
 static int send_am_req(priskv_client *client, const void *buf, size_t len);
 static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
                            uint64_t timeout, uint64_t request_id, size_t *out_len);
 
-static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout)
+static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
 {
     impl->pendings = realloc(impl->pendings, (impl->npending + 1) * sizeof(pending_req));
     impl->pendings[impl->npending].id = id;
@@ -67,6 +73,7 @@ static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_comma
     impl->pendings[impl->npending].nsgl = nsgl;
     impl->pendings[impl->npending].str = str ? strdup(str) : NULL;
     impl->pendings[impl->npending].timeout = timeout;
+    impl->pendings[impl->npending].auto_mems = auto_mems;
     impl->npending++;
 }
 
@@ -87,15 +94,44 @@ static void pend_remove(priskv_ucp_client_impl *impl, uint64_t id)
     }
     for (size_t i = j; i < impl->npending; i++) {
         if (impl->pendings[i].str) free(impl->pendings[i].str);
+        if (impl->pendings[i].auto_mems) {
+            for (uint16_t k = 0; k < impl->pendings[i].nsgl; k++) {
+                if (impl->pendings[i].auto_mems[k]) priskv_dereg_memory(impl->pendings[i].auto_mems[k]);
+            }
+            free(impl->pendings[i].auto_mems);
+        }
     }
     impl->npending = j;
     impl->pendings = realloc(impl->pendings, impl->npending * sizeof(pending_req));
 }
 
-static ucs_status_t am_resp_cb_compat(void *arg, void *data, size_t length, ucp_ep_h reply_ep, unsigned flags)
+static ucs_status_t am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
     priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
-    priskv_response *resp = (priskv_response *)data;
+    uint32_t recv_attr = param->recv_attr;
+    int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
+    uint8_t *msg = (uint8_t *)data;
+    size_t msg_len = length;
+    uint8_t *owned_buf = NULL;
+    if (is_rndv) {
+        owned_buf = (uint8_t *)malloc(length);
+        if (!owned_buf) {
+            return UCS_OK;
+        }
+        ucp_request_param_t rp;
+        memset(&rp, 0, sizeof(rp));
+        rp.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+        rp.memory_type = UCS_MEMORY_TYPE_HOST;
+        void *r = ucp_am_recv_data_nbx(impl->worker, data, owned_buf, length, &rp);
+        if (UCS_PTR_IS_PTR(r)) {
+            while (ucp_request_check_status(r) == UCS_INPROGRESS) {
+            }
+            ucp_request_free(r);
+        }
+        msg = owned_buf;
+        msg_len = length;
+    }
+    priskv_response *resp = (priskv_response *)msg;
     uint64_t id = be64toh(resp->request_id);
     uint16_t status = be16toh(resp->status);
     uint32_t len = be32toh(resp->length);
@@ -156,10 +192,14 @@ static ucs_status_t am_resp_cb_compat(void *arg, void *data, size_t length, ucp_
                 pend_remove(impl, id);
             }
         } else {
-            p->cb(id, (priskv_status)status, NULL);
+            p->cb(id, (priskv_status)status, &len);
             pend_remove(impl, id);
         }
     }
+    if (is_rndv) {
+        ucp_am_data_release(impl->worker, data);
+    }
+    if (owned_buf) free(owned_buf);
     return UCS_OK;
 }
 static priskv_client *priskv_client_new(void)
@@ -219,8 +259,35 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         return NULL;
     }
 
-    ucp_worker_set_am_handler(impl->worker, priskv_ucp_am_id_resp, am_resp_cb_compat, impl,
-                              UCP_AM_FLAG_WHOLE_MSG);
+    {
+        ucp_am_handler_param_t hparam;
+        memset(&hparam, 0, sizeof(hparam));
+        hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
+        hparam.id = priskv_ucp_am_id_resp;
+        hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
+        hparam.cb = am_resp_cb;
+        hparam.arg = impl;
+        if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
+            ucp_worker_destroy(impl->worker);
+            ucp_cleanup(impl->context);
+            free(impl);
+            priskv_client_free(client);
+            return NULL;
+        }
+        memset(&hparam, 0, sizeof(hparam));
+        hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
+        hparam.id = priskv_ucp_am_id_info;
+        hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
+        hparam.cb = am_info_cb;
+        hparam.arg = impl;
+        if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
+            ucp_worker_destroy(impl->worker);
+            ucp_cleanup(impl->context);
+            free(impl);
+            priskv_client_free(client);
+            return NULL;
+        }
+    }
 
     struct sockaddr_in dst;
     memset(&dst, 0, sizeof(dst));
@@ -247,6 +314,21 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
     ucp_worker_arm(impl->worker);
     impl->owner = client;
     client->impl = impl;
+    {
+        ucp_request_param_t p;
+        memset(&p, 0, sizeof(p));
+        p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FIELD_FLAGS;
+        p.memory_type = UCS_MEMORY_TYPE_HOST;
+        p.flags = UCP_AM_SEND_FLAG_REPLY;
+        void *r = ucp_am_send_nbx(impl->ep, priskv_ucp_am_id_info, NULL, 0, NULL, 0, &p);
+        if (UCS_PTR_IS_PTR(r)) {
+            int spins = 1000;
+            while (ucp_request_check_status(r) == UCS_INPROGRESS && spins-- > 0) {
+                ucp_worker_progress(impl->worker);
+            }
+            ucp_request_free(r);
+        }
+    }
     return client;
 }
 
@@ -379,9 +461,20 @@ static int submit_req(priskv_client *client, priskv_req_command cmd, const char 
                       uint64_t request_id, priskv_generic_cb cb)
 {
     size_t len = 0;
+    priskv_memory **auto_mems = NULL;
+    if (nsgl > 0) {
+        auto_mems = calloc(nsgl, sizeof(priskv_memory *));
+        for (uint16_t i = 0; i < nsgl; i++) {
+            if (!sgl[i].mem) {
+                priskv_memory *m = priskv_reg_memory(client, sgl[i].iova, sgl[i].length, sgl[i].iova, -1);
+                auto_mems[i] = m;
+                sgl[i].mem = m;
+            }
+        }
+    }
     void *buf = build_req_buf(cmd, str, sgl, nsgl, timeout, request_id, &len);
     if (!buf) return -ENOMEM;
-    pend_add(client->impl, request_id, cmd, cb, sgl, nsgl, str, timeout);
+    pend_add(client->impl, request_id, cmd, cb, sgl, nsgl, str, timeout, auto_mems);
     int rc = send_am_req(client, buf, len);
     free(buf);
     return rc;
@@ -467,7 +560,43 @@ void priskv_keyset_free(priskv_keyset *keyset)
 
 uint64_t priskv_capacity(priskv_client *client)
 {
-    return 0;
+    if (!client || !client->impl) return 0;
+    return client->impl->capacity;
 }
-/* UCX AM API compatibility */
-/* removed compatibility macros: use latest UCP AM APIs directly */
+static ucs_status_t am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
+{
+    priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
+    uint32_t recv_attr = param->recv_attr;
+    int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
+    uint8_t *msg = (uint8_t *)data;
+    uint8_t *owned_buf = NULL;
+    if (is_rndv) {
+        owned_buf = (uint8_t *)malloc(length);
+        if (!owned_buf) return UCS_OK;
+        ucp_request_param_t rp;
+        memset(&rp, 0, sizeof(rp));
+        rp.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+        rp.memory_type = UCS_MEMORY_TYPE_HOST;
+        void *r = ucp_am_recv_data_nbx(impl->worker, data, owned_buf, length, &rp);
+        if (UCS_PTR_IS_PTR(r)) {
+            while (ucp_request_check_status(r) == UCS_INPROGRESS) {}
+            ucp_request_free(r);
+        }
+        msg = owned_buf;
+    }
+    struct {
+        uint64_t capacity_be;
+        uint16_t max_sgl_be;
+        uint16_t max_key_length_be;
+        uint16_t max_inflight_command_be;
+    } *info = (void *)msg;
+    impl->capacity = be64toh(info->capacity_be);
+    impl->max_sgl = be16toh(info->max_sgl_be);
+    impl->max_key_length = be16toh(info->max_key_length_be);
+    impl->max_inflight_command = be16toh(info->max_inflight_command_be);
+    if (is_rndv) {
+        ucp_am_data_release(impl->worker, data);
+    }
+    if (owned_buf) free(owned_buf);
+    return UCS_OK;
+}

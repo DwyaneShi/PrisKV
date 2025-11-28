@@ -27,16 +27,6 @@ static void priskv_tiering_req_free(priskv_tiering_req *treq)
     free(treq);
 }
 
-static int priskv_transport_send_response(ucp_ep_h ep, uint64_t request_id, priskv_resp_status status, uint32_t length)
-{
-    return priskv_transport_send_response(ep, request_id, status, length);
-}
-
-static int priskv_transport_rw_req(ucp_ep_h ep, priskv_request *req, uint8_t *buf, uint32_t valuelen, int is_set, void (*cb)(void *), void *cbarg)
-{
-    return priskv_transport_rw_req(ep, req, buf, valuelen, is_set, cb, cbarg);
-}
-
 priskv_tiering_req *priskv_tiering_req_new(priskv_transport_conn *conn, priskv_request *req,
                                                   uint8_t *key, uint16_t keylen, uint64_t timeout,
                                                   priskv_req_command cmd, uint32_t remote_valuelen,

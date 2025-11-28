@@ -71,6 +71,7 @@ static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
 
 static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
 {
+    priskv_log_debug("priskv_pend_add: id %lu, cmd %d, cb %p, sgl %p, nsgl %d, str %s, timeout %lu\n", id, cmd, cb, sgl, nsgl, str, timeout);
     impl->pendings = realloc(impl->pendings, (impl->npending + 1) * sizeof(pending_req));
     impl->pendings[impl->npending].id = id;
     impl->pendings[impl->npending].cmd = cmd;
@@ -85,6 +86,7 @@ static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_comma
 
 static pending_req *pend_find(priskv_ucp_client_impl *impl, uint64_t id)
 {
+    priskv_log_debug("priskv_pend_find: id %lu\n", id);
     for (size_t i = 0; i < impl->npending; i++) {
         if (impl->pendings[i].id == id) return &impl->pendings[i];
     }
@@ -93,6 +95,7 @@ static pending_req *pend_find(priskv_ucp_client_impl *impl, uint64_t id)
 
 static void pend_remove(priskv_ucp_client_impl *impl, uint64_t id)
 {
+    priskv_log_debug("priskv_pend_remove: id %lu\n", id);
     size_t j = 0;
     for (size_t i = 0; i < impl->npending; i++) {
         if (impl->pendings[i].id == id) continue;
@@ -563,10 +566,18 @@ static ucs_status_t priskv_ucp_am_resp_cb(void *arg, const void *header, size_t 
     uint64_t id = be64toh(resp->request_id);
     uint16_t status = be16toh(resp->status);
     uint32_t len = be32toh(resp->length);
+    priskv_log_debug("priskv_ucp_am_resp_cb: recv am resp, id %lu, status %u, length %u\n", id, status, len);
+
     pending_req *p = pend_find(impl, id);
-    if (p) {
-        priskv_log_debug("priskv_ucp_am_resp_cb: recv am resp, id %lu, status %u, length %u\n", id, status, len);
+    if (!p) {
+        priskv_log_error("priskv_ucp_am_resp_cb: recv am resp, id %lu not found\n", id);
+        if (is_rndv) {
+            ucp_am_data_release(impl->worker, data);
+        }
+        if (owned_buf) free(owned_buf);
+        return UCS_OK;
     }
+
     if (p && p->cb) {
         if (p->cmd == PRISKV_COMMAND_KEYS) {
             if (status == PRISKV_RESP_STATUS_VALUE_TOO_BIG) {

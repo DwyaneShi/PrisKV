@@ -97,6 +97,9 @@ static void priskv_transport_conn_remove(ucp_ep_h ep);
 static void priskv_transport_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
 static void priskv_transport_send_done_cb(void *request, ucs_status_t status, void *user_data);
 static ucs_status_t priskv_transport_am_info_req_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
+static void *priskv_transport_am_send(ucp_ep_h ep, uint8_t am_id, const void *payload,
+                                      size_t length, void (*cb)(void *, ucs_status_t, void *),
+                                      void *user_data);
 
 static void priskv_transport_destroy_segs(priskv_transport_rma_seg *segs, uint16_t n)
 {

@@ -7,6 +7,7 @@ extern "C" {
 
 #include <limits.h>
 #include <stdbool.h>
+#include <ucp/api/ucp.h>
 
 #include "priskv-protocol.h"
 

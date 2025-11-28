@@ -35,7 +35,7 @@
 #include "priskv-log.h"
 #include "priskv-logo.h"
 
-#include "ucp.h"
+#include "transport.h"
 #include "memory.h"
 #include "kv.h"
 #include "priskv-threads.h"
@@ -57,7 +57,7 @@ static const char *memfile;
 static priskv_log_level log_level = priskv_log_notice;
 static const char *g_log_file = NULL;
 static priskv_logger *g_logger = NULL;
-static priskv_ucp_conn_cap conn_cap = {.max_sgl = PRISKV_TRANSPORT_DEFAULT_SGL,
+static priskv_transport_conn_cap conn_cap = {.max_sgl = PRISKV_TRANSPORT_DEFAULT_SGL,
                                       .max_key_length = PRISKV_TRANSPORT_DEFAULT_KEY_LENGTH,
                                       .max_inflight_command = PRISKV_TRANSPORT_DEFAULT_INFLIGHT_COMMAND};
 
@@ -370,9 +370,9 @@ static void *priskv_server_create_kv()
     return kv;
 }
 
-static void __priskv_ucp_process(evutil_socket_t fd, short events, void *arg)
+static void __priskv_transport_process(evutil_socket_t fd, short events, void *arg)
 {
-    priskv_ucp_process();
+    priskv_transport_process();
 }
 
 static int priskv_server_start(struct event_base *evbase)
@@ -400,11 +400,11 @@ static int priskv_server_start(struct event_base *evbase)
     priskv_set_expire_routine_interval(g_kv, expire_routine_interval);
     priskv_expire_routine(bgthread, g_kv);
 
-    if (priskv_ucp_listen(addresses, naddr, port, g_kv, &conn_cap)) {
+    if (priskv_transport_listen(addresses, naddr, port, g_kv, &conn_cap)) {
         return -1;
     }
 
-    ev = event_new(evbase, priskv_ucp_get_fd(), EV_READ | EV_PERSIST, __priskv_ucp_process, NULL);
+    ev = event_new(evbase, priskv_transport_get_fd(), EV_READ | EV_PERSIST, __priskv_transport_process, NULL);
 
     return event_add(ev, NULL);
 };

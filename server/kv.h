@@ -38,6 +38,7 @@ extern "C"
 #include "priskv-protocol.h"
 #include "backend/backend.h"
 
+struct priskv_transport_conn;
 typedef struct priskv_transport_conn priskv_transport_conn;
 
 #define PRISKV_KV_DEFAULT_EXPIRE_ROUTINE_INTERVAL 600

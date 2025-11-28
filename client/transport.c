@@ -11,7 +11,7 @@
 #include "priskv-protocol-helper.h"
 #include "priskv-log.h"
 
-typedef struct priskv_ucp_client_impl {
+typedef struct priskv_transport_client_impl {
     ucp_context_h context;
     ucp_worker_h worker;
     ucp_ep_h ep;
@@ -27,23 +27,23 @@ typedef struct priskv_ucp_client_impl {
     uint16_t max_sgl;
     uint16_t max_key_length;
     uint16_t max_inflight_command;
-} priskv_ucp_client_impl;
+} priskv_transport_client_impl;
 
 struct priskv_client {
-    priskv_ucp_client_impl *impl;
+    priskv_transport_client_impl *impl;
 };
 
-typedef struct priskv_ucp_memory_impl {
+typedef struct priskv_transport_memory_impl {
     ucp_mem_h memh;
     void *rkey_buf;
     size_t rkey_len;
     uint64_t iova;
     size_t length;
     ucp_context_h context;
-} priskv_ucp_memory_impl;
+} priskv_transport_memory_impl;
 
 struct priskv_memory {
-    priskv_ucp_memory_impl *impl;
+    priskv_transport_memory_impl *impl;
 };
 
 typedef struct pending_req {
@@ -57,19 +57,19 @@ typedef struct pending_req {
     priskv_memory **auto_mems;
 } pending_req;
 
-static uint8_t priskv_ucp_am_id_req = 1;
-static uint8_t priskv_ucp_am_id_resp = 2;
-static uint8_t priskv_ucp_am_id_info_req = 3;
-static uint8_t priskv_ucp_am_id_info_resp = 4;
+static uint8_t priskv_transport_am_id_req = 1;
+static uint8_t priskv_transport_am_id_resp = 2;
+static uint8_t priskv_transport_am_id_info_req = 3;
+static uint8_t priskv_transport_am_id_info_resp = 4;
 
-static int send_am_req(priskv_client *client, const void *buf, size_t len);
-static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
+static int priskv_transport_send_am_req(priskv_client *client, const void *buf, size_t len);
+static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
                            uint64_t timeout, uint64_t request_id, size_t *out_len);
-static ucs_status_t priskv_ucp_am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
-static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
+static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
+static ucs_status_t priskv_transport_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
 
-static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
+static void pend_add(priskv_transport_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
 {
     priskv_log_debug("priskv_pend_add: id %lu, cmd %d, cb %p, sgl %p, nsgl %d, str %s, timeout %lu\n", id, cmd, cb, sgl, nsgl, str, timeout);
     impl->pendings = realloc(impl->pendings, (impl->npending + 1) * sizeof(pending_req));
@@ -84,7 +84,7 @@ static void pend_add(priskv_ucp_client_impl *impl, uint64_t id, priskv_req_comma
     impl->npending++;
 }
 
-static pending_req *pend_find(priskv_ucp_client_impl *impl, uint64_t id)
+static pending_req *pend_find(priskv_transport_client_impl *impl, uint64_t id)
 {
     priskv_log_debug("priskv_pend_find: id %lu\n", id);
     for (size_t i = 0; i < impl->npending; i++) {
@@ -93,7 +93,7 @@ static pending_req *pend_find(priskv_ucp_client_impl *impl, uint64_t id)
     return NULL;
 }
 
-static void pend_remove(priskv_ucp_client_impl *impl, uint64_t id)
+static void pend_remove(priskv_transport_client_impl *impl, uint64_t id)
 {
     priskv_log_debug("priskv_pend_remove: id %lu\n", id);
     size_t j = 0;
@@ -147,7 +147,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         return NULL;
     }
 
-    priskv_ucp_client_impl *impl = calloc(1, sizeof(*impl));
+    priskv_transport_client_impl *impl = calloc(1, sizeof(*impl));
     if (!impl) {
         priskv_client_free(client);
         ucp_config_release(config);
@@ -179,9 +179,9 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         ucp_am_handler_param_t hparam;
         memset(&hparam, 0, sizeof(hparam));
         hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
-        hparam.id = priskv_ucp_am_id_resp;
+        hparam.id = priskv_transport_am_id_resp;
         hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-        hparam.cb = priskv_ucp_am_resp_cb;
+        hparam.cb = priskv_transport_am_resp_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
             priskv_log_error("priskv_connect: set am recv handler failed\n");
@@ -193,9 +193,9 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         }
         memset(&hparam, 0, sizeof(hparam));
         hparam.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID | UCP_AM_HANDLER_PARAM_FIELD_FLAGS | UCP_AM_HANDLER_PARAM_FIELD_CB | UCP_AM_HANDLER_PARAM_FIELD_ARG;
-        hparam.id = priskv_ucp_am_id_info_resp;
+        hparam.id = priskv_transport_am_id_info_resp;
         hparam.flags = UCP_AM_FLAG_WHOLE_MSG;
-        hparam.cb = priskv_ucp_am_info_cb;
+        hparam.cb = priskv_transport_am_info_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
             priskv_log_error("priskv_connect: set am recv handler failed\n");
@@ -247,7 +247,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FIELD_FLAGS;
         p.memory_type = UCS_MEMORY_TYPE_HOST;
         p.flags = UCP_AM_SEND_FLAG_REPLY;
-        void *r = ucp_am_send_nbx(impl->ep, priskv_ucp_am_id_info_req, NULL, 0, NULL, 0, &p);
+        void *r = ucp_am_send_nbx(impl->ep, priskv_transport_am_id_info_req, NULL, 0, NULL, 0, &p);
         if (UCS_PTR_IS_PTR(r)) {
             int spins = 1000;
             while (ucp_request_check_status(r) == UCS_INPROGRESS && spins-- > 0) {
@@ -262,7 +262,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
 void priskv_close(priskv_client *client)
 {
     if (!client || !client->impl) return;
-    priskv_ucp_client_impl *impl = client->impl;
+    priskv_transport_client_impl *impl = client->impl;
     if (impl->ep) {
         ucp_ep_destroy(impl->ep);
     }
@@ -298,7 +298,7 @@ priskv_memory *priskv_reg_memory(priskv_client *client, uint64_t offset, size_t 
     if (!client || !client->impl) return NULL;
     priskv_memory *m = calloc(1, sizeof(*m));
     if (!m) return NULL;
-    priskv_ucp_memory_impl *impl = calloc(1, sizeof(*impl));
+    priskv_transport_memory_impl *impl = calloc(1, sizeof(*impl));
     if (!impl) { free(m); return NULL; }
 
     ucp_mem_map_params_t mm;
@@ -326,7 +326,7 @@ priskv_memory *priskv_reg_memory(priskv_client *client, uint64_t offset, size_t 
 void priskv_dereg_memory(priskv_memory *mem)
 {
     if (!mem) return;
-    priskv_ucp_memory_impl *impl = mem->impl;
+    priskv_transport_memory_impl *impl = mem->impl;
     if (impl) {
         if (impl->rkey_buf) ucp_rkey_buffer_release(impl->rkey_buf);
         if (impl->memh) ucp_mem_unmap(impl->context, impl->memh);
@@ -335,26 +335,26 @@ void priskv_dereg_memory(priskv_memory *mem)
     free(mem);
 }
 
-static int send_am_req(priskv_client *client, const void *buf, size_t len)
+static int priskv_transport_send_am_req(priskv_client *client, const void *buf, size_t len)
 {
     ucp_request_param_t p;
     memset(&p, 0, sizeof(p));
     p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FIELD_FLAGS;
     p.memory_type = UCS_MEMORY_TYPE_HOST;
     p.flags = UCP_AM_SEND_FLAG_REPLY;
-    void *r = ucp_am_send_nbx(client->impl->ep, priskv_ucp_am_id_req, NULL, 0, buf, len, &p);
+    void *r = ucp_am_send_nbx(client->impl->ep, priskv_transport_am_id_req, NULL, 0, buf, len, &p);
     if (UCS_PTR_IS_ERR(r)) return -1;
     return 0;
 }
 
-static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl, uint64_t timeout, uint64_t request_id, size_t *out_len)
+static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl, uint64_t timeout, uint64_t request_id, size_t *out_len)
 {
     uint16_t keylen = (uint16_t)strlen(key);
     size_t hdr = sizeof(priskv_request) + nsgl * sizeof(priskv_keyed_sgl) + keylen;
     size_t rks = 0;
     for (uint16_t i = 0; i < nsgl; i++) {
         rks += sizeof(uint16_t);
-        rks += ((priskv_ucp_memory_impl *)sgl[i].mem->impl)->rkey_len;
+        rks += ((priskv_transport_memory_impl *)sgl[i].mem->impl)->rkey_len;
     }
     size_t total = hdr + rks;
     uint8_t *buf = malloc(total);
@@ -374,7 +374,7 @@ static void *build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *
     memcpy(keyptr, key, keylen);
     uint8_t *p = keyptr + keylen;
     for (uint16_t i = 0; i < nsgl; i++) {
-        priskv_ucp_memory_impl *minfo = (priskv_ucp_memory_impl *)sgl[i].mem->impl;
+        priskv_transport_memory_impl *minfo = (priskv_transport_memory_impl *)sgl[i].mem->impl;
         uint16_t l = (uint16_t)minfo->rkey_len;
         uint16_t lbe = htobe16(l);
         memcpy(p, &lbe, sizeof(lbe));
@@ -402,15 +402,15 @@ static int submit_req(priskv_client *client, priskv_req_command cmd, const char 
             }
         }
     }
-    void *buf = build_req_buf(cmd, str, sgl, nsgl, timeout, request_id, &len);
+    void *buf = priskv_transport_build_req_buf(cmd, str, sgl, nsgl, timeout, request_id, &len);
     if (!buf) return -ENOMEM;
     pend_add(client->impl, request_id, cmd, cb, sgl, nsgl, str, timeout, auto_mems);
-    int rc = send_am_req(client, buf, len);
+    int rc = priskv_transport_send_am_req(client, buf, len);
     free(buf);
     return rc;
 }
 
-static int ensure_keys_buffer(priskv_ucp_client_impl *impl, priskv_client *client)
+static int ensure_keys_buffer(priskv_transport_client_impl *impl, priskv_client *client)
 {
     if (impl->keys_buf && impl->keys_mem) return 0;
     impl->keys_buf_len = 4096;
@@ -468,7 +468,7 @@ int priskv_flush_async(priskv_client *client, const char *regex, uint64_t reques
 int priskv_keys_async(priskv_client *client, const char *regex, uint64_t request_id, priskv_generic_cb cb)
 {
     if (!client) return -EINVAL;
-    priskv_ucp_client_impl *impl = client->impl;
+    priskv_transport_client_impl *impl = client->impl;
     int e = ensure_keys_buffer(impl, client);
     if (e) return e;
     priskv_sgl sgl;
@@ -494,15 +494,15 @@ uint64_t priskv_capacity(priskv_client *client)
     return client->impl->capacity;
 }
 
-static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
+static ucs_status_t priskv_transport_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
-    priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
+    priskv_transport_client_impl *impl = (priskv_transport_client_impl *)arg;
     uint32_t recv_attr = param->recv_attr;
     int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
     uint8_t *msg = (uint8_t *)data;
     uint8_t *owned_buf = NULL;
     if (is_rndv) {
-        priskv_log_debug("priskv_ucp_am_info_cb: AM recv rndv data, length %zu\n", length);
+        priskv_log_debug("priskv_transport_am_info_cb: AM recv rndv data, length %zu\n", length);
         owned_buf = (uint8_t *)malloc(length);
         if (!owned_buf) return UCS_OK;
         ucp_request_param_t rp;
@@ -526,7 +526,7 @@ static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t 
     impl->max_sgl = be16toh(info->max_sgl_be);
     impl->max_key_length = be16toh(info->max_key_length_be);
     impl->max_inflight_command = be16toh(info->max_inflight_command_be);
-    priskv_log_info("priskv_ucp_am_info_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16 "\n",
+    priskv_log_info("priskv_transport_am_info_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16 "\n",
                     impl->capacity, impl->max_sgl, impl->max_key_length, impl->max_inflight_command);
     if (is_rndv) {
         ucp_am_data_release(impl->worker, data);
@@ -535,19 +535,19 @@ static ucs_status_t priskv_ucp_am_info_cb(void *arg, const void *header, size_t 
     return UCS_OK;
 }
 
-static ucs_status_t priskv_ucp_am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
+static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
-    priskv_log_debug("priskv_ucp_am_resp_cb: recv am resp, length %zu\n", length);
-    priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
+    priskv_log_debug("priskv_transport_am_resp_cb: recv am resp, length %zu\n", length);
+    priskv_transport_client_impl *impl = (priskv_transport_client_impl *)arg;
     uint32_t recv_attr = param->recv_attr;
     int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
     uint8_t *msg = (uint8_t *)data;
     uint8_t *owned_buf = NULL;
     if (is_rndv) {
-        priskv_log_debug("priskv_ucp_am_resp_cb: recv am resp rndv, length %zu\n", length);
+        priskv_log_debug("priskv_transport_am_resp_cb: recv am resp rndv, length %zu\n", length);
         owned_buf = (uint8_t *)malloc(length);
         if (!owned_buf) {
-            priskv_log_error("priskv_ucp_am_resp_cb: recv am resp rndv, malloc failed\n");
+            priskv_log_error("priskv_transport_am_resp_cb: recv am resp rndv, malloc failed\n");
             return UCS_OK;
         }
         ucp_request_param_t rp;
@@ -566,11 +566,11 @@ static ucs_status_t priskv_ucp_am_resp_cb(void *arg, const void *header, size_t 
     uint64_t id = be64toh(resp->request_id);
     uint16_t status = be16toh(resp->status);
     uint32_t len = be32toh(resp->length);
-    priskv_log_debug("priskv_ucp_am_resp_cb: recv am resp, id %lu, status %u, length %u\n", id, status, len);
+    priskv_log_debug("priskv_transport_am_resp_cb: recv am resp, id %lu, status %u, length %u\n", id, status, len);
 
     pending_req *p = pend_find(impl, id);
     if (!p) {
-        priskv_log_error("priskv_ucp_am_resp_cb: recv am resp, id %lu not found\n", id);
+        priskv_log_error("priskv_transport_am_resp_cb: recv am resp, id %lu not found\n", id);
         if (is_rndv) {
             ucp_am_data_release(impl->worker, data);
         }
@@ -595,9 +595,9 @@ static ucs_status_t priskv_ucp_am_resp_cb(void *arg, const void *header, size_t 
                 sgl.length = newlen;
                 sgl.mem = impl->keys_mem;
                 size_t slen = 0;
-                void *buf = build_req_buf(PRISKV_COMMAND_KEYS, p->str, &sgl, 1, 0, id, &slen);
+                void *buf = priskv_transport_build_req_buf(PRISKV_COMMAND_KEYS, p->str, &sgl, 1, 0, id, &slen);
                 if (buf) {
-                    send_am_req(impl->owner, buf, slen);
+                    priskv_transport_send_am_req(impl->owner, buf, slen);
                     free(buf);
                 }
             } else if (status == PRISKV_RESP_STATUS_OK) {
@@ -647,7 +647,7 @@ static ucs_status_t priskv_ucp_am_resp_cb(void *arg, const void *header, size_t 
 
 static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
 {
-    priskv_ucp_client_impl *impl = (priskv_ucp_client_impl *)arg;
+    priskv_transport_client_impl *impl = (priskv_transport_client_impl *)arg;
     ucp_request_param_t p;
     memset(&p, 0, sizeof(p));
     p.op_attr_mask = UCP_OP_ATTR_FIELD_FLAGS;

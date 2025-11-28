@@ -5,6 +5,7 @@
 #include "priskv-log.h"
 #include "priskv-threads.h"
 #include "backend/backend.h"
+#include "transport.h"
 #include "kv.h"
 #include "priskv-protocol.h"
 #include "priskv-protocol-helper.h"
@@ -28,53 +29,12 @@ static void priskv_tiering_req_free(priskv_tiering_req *treq)
 
 static int priskv_transport_send_response(ucp_ep_h ep, uint64_t request_id, priskv_resp_status status, uint32_t length)
 {
-    priskv_response resp = {0};
-    resp.request_id = htobe64(request_id);
-    resp.status = htobe16(status);
-    resp.length = htobe32(length);
-    ucp_request_param_t sp;
-    memset(&sp, 0, sizeof(sp));
-    void *sr = ucp_am_send_nbx(ep, 2, NULL, 0, &resp, sizeof(resp), &sp);
-    if (UCS_PTR_IS_PTR(sr)) {
-        while (ucp_request_check_status(sr) == UCS_INPROGRESS) {
-        }
-        ucp_request_free(sr);
-    }
-    return 0;
+    return priskv_transport_send_response(ep, request_id, status, length);
 }
 
 static int priskv_transport_rw_req(ucp_ep_h ep, priskv_request *req, uint8_t *buf, uint32_t valuelen, int is_set, void (*cb)(void *), void *cbarg)
 {
-    uint16_t nsgl = be16toh(req->nsgl);
-    uint16_t keylen = be16toh(req->key_length);
-    uint8_t *keyptr = priskv_request_key(req, nsgl);
-    const uint8_t *p = keyptr + keylen;
-    ucp_request_param_t rparam;
-    memset(&rparam, 0, sizeof(rparam));
-    uint64_t off = 0;
-    for (uint16_t i = 0; i < nsgl; i++) {
-        uint16_t rkey_len_be;
-        memcpy(&rkey_len_be, p, sizeof(rkey_len_be));
-        uint16_t rkey_len = be16toh(rkey_len_be);
-        p += sizeof(rkey_len_be);
-        ucp_rkey_h rkey;
-        if (ucp_ep_rkey_unpack(ep, p, &rkey) != UCS_OK) {
-            return -1;
-        }
-        uint64_t addr = be64toh(req->sgls[i].addr);
-        uint32_t len = be32toh(req->sgls[i].length);
-        void *r = is_set ? ucp_get_nbx(ep, buf + off, len, addr, rkey, &rparam)
-                         : ucp_put_nbx(ep, buf + off, len, addr, rkey, &rparam);
-        if (UCS_PTR_IS_PTR(r)) {
-            while (ucp_request_check_status(r) == UCS_INPROGRESS) {
-            }
-            ucp_request_free(r);
-        }
-        ucp_rkey_destroy(rkey);
-        off += len;
-    }
-    if (cb) cb(cbarg);
-    return 0;
+    return priskv_transport_rw_req(ep, req, buf, valuelen, is_set, cb, cbarg);
 }
 
 priskv_tiering_req *priskv_tiering_req_new(priskv_transport_conn *conn, priskv_request *req,
@@ -109,7 +69,7 @@ priskv_tiering_req *priskv_tiering_req_new(priskv_transport_conn *conn, priskv_r
     treq->conn = conn;
     treq->thread = thread;
     treq->backend = backend;
-    treq->kv = priskv_ucp_get_kv();
+    treq->kv = priskv_transport_get_kv();
     treq->req = req;
     treq->request_id = req->request_id;
     treq->keylen = keylen;

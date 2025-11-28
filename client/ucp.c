@@ -224,6 +224,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
 {
     ucp_config_t *config;
     if (ucp_config_read(NULL, NULL, &config) != UCS_OK) {
+        priskv_log_error("priskv_connect: read ucp config failed\n");
         return NULL;
     }
 
@@ -236,6 +237,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
 
     priskv_client *client = priskv_client_new();
     if (!client) {
+        priskv_log_error("priskv_connect: create client failed\n");
         ucp_config_release(config);
         return NULL;
     }
@@ -248,6 +250,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
     }
 
     if (ucp_init(&params, config, &impl->context) != UCS_OK) {
+        priskv_log_error("priskv_connect: init ucp failed\n");
         free(impl);
         priskv_client_free(client);
         ucp_config_release(config);
@@ -260,6 +263,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
     wparams.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
     wparams.thread_mode = UCS_THREAD_MODE_SINGLE;
     if (ucp_worker_create(impl->context, &wparams, &impl->worker) != UCS_OK) {
+        priskv_log_error("priskv_connect: create worker failed\n");
         ucp_cleanup(impl->context);
         free(impl);
         priskv_client_free(client);
@@ -275,6 +279,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.cb = priskv_ucp_am_resp_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
+            priskv_log_error("priskv_connect: set am recv handler failed\n");
             ucp_worker_destroy(impl->worker);
             ucp_cleanup(impl->context);
             free(impl);
@@ -288,6 +293,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.cb = priskv_ucp_am_resp_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
+            priskv_log_error("priskv_connect: set am recv handler failed\n");
             ucp_worker_destroy(impl->worker);
             ucp_cleanup(impl->context);
             free(impl);
@@ -301,6 +307,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.cb = priskv_ucp_am_info_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
+            priskv_log_error("priskv_connect: set am recv handler failed\n");
             ucp_worker_destroy(impl->worker);
             ucp_cleanup(impl->context);
             free(impl);
@@ -314,6 +321,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
         hparam.cb = priskv_ucp_am_info_cb;
         hparam.arg = impl;
         if (ucp_worker_set_am_recv_handler(impl->worker, &hparam) != UCS_OK) {
+            priskv_log_error("priskv_connect: set am recv handler failed\n");
             ucp_worker_destroy(impl->worker);
             ucp_cleanup(impl->context);
             free(impl);
@@ -337,6 +345,7 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
     ep_params.err_handler.cb = priskv_client_ep_err_cb;
     ep_params.err_handler.arg = impl;
     if (ucp_ep_create(impl->worker, &ep_params, &impl->ep) != UCS_OK) {
+        priskv_log_error("priskv_connect: create ep failed\n");
         ucp_worker_destroy(impl->worker);
         ucp_cleanup(impl->context);
         free(impl);

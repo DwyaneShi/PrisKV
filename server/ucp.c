@@ -44,12 +44,6 @@ typedef struct priskv_ucp_conn {
     priskv_ucp_mem rmem[PRISKV_UCP_MEM_MAX];
 } priskv_ucp_conn;
 
-static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep);
-static void priskv_ucp_conn_add(ucp_ep_h ep);
-static void priskv_ucp_conn_remove(ucp_ep_h ep);
-static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
-static void priskv_ucp_send_done(void *request, ucs_status_t status, void *user_data);
-
 typedef struct priskv_ucp_server {
     int epollfd;
     void *kv;
@@ -58,6 +52,31 @@ typedef struct priskv_ucp_server {
     ucp_listener_h listener;
     priskv_ucp_conn_cap default_cap;
 } priskv_ucp_server;
+
+typedef struct {
+        uint64_t capacity_be;
+        uint16_t max_sgl_be;
+        uint16_t max_key_length_be;
+        uint16_t max_inflight_command_be;
+} priskv_server_capability;
+
+typedef struct ucp_rma_seg {
+    ucp_rkey_h rkey;
+    uint64_t addr;
+    uint32_t length;
+} ucp_rma_seg;
+
+typedef struct priskv_ucp_rw_work {
+    ucp_ep_h ep;
+    priskv_request *req;
+    ucp_rma_seg *segs;
+    uint16_t nsgl;
+    uint16_t completed;
+    uint8_t *buf;
+    uint32_t len;
+    void (*end_cb)(void *);
+    void *end_arg;
+} priskv_ucp_rw_work;
 
 static priskv_ucp_server g_server = {
     .epollfd = -1,
@@ -72,12 +91,11 @@ static uint8_t priskv_ucp_am_id_resp = 2;
 static uint8_t priskv_ucp_am_id_info_req = 3;
 static uint8_t priskv_ucp_am_id_info_resp = 4;
 
-typedef struct ucp_rma_seg {
-    ucp_rkey_h rkey;
-    uint64_t addr;
-    uint32_t length;
-} ucp_rma_seg;
-
+static priskv_ucp_conn *priskv_ucp_conn_get(ucp_ep_h ep);
+static void priskv_ucp_conn_add(ucp_ep_h ep);
+static void priskv_ucp_conn_remove(ucp_ep_h ep);
+static void priskv_ucp_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
+static void priskv_ucp_send_done(void *request, ucs_status_t status, void *user_data);
 static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 
 static void ucp_destroy_segs(ucp_rma_seg *segs, uint16_t n)
@@ -113,6 +131,73 @@ static ucp_rma_seg *ucp_unpack_segs(ucp_ep_h ep, const priskv_request *req, cons
     }
     return segs;
 }
+
+static void priskv_ucp_rw_complete_cb(void *request, ucs_status_t status, void *user_data)
+{
+    priskv_ucp_rw_work *w = (priskv_ucp_rw_work *)user_data;
+    if (!w) return;
+    w->completed++;
+    if (w->completed < w->nsgl) return;
+    if (w->end_cb) w->end_cb(w->end_arg);
+    struct timeval tv2;
+    gettimeofday(&tv2, NULL);
+    w->req->runtime.server_data_recv_time = tv2;
+    priskv_response *rd = malloc(sizeof(*rd));
+    if (rd) {
+        rd->request_id = w->req->request_id;
+        rd->timeout = w->req->timeout;
+        rd->status = htobe16(PRISKV_RESP_STATUS_OK);
+        rd->length = htobe32(w->len);
+        ucp_request_param_t sp;
+        memset(&sp, 0, sizeof(sp));
+        sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
+        sp.cb.send = priskv_ucp_send_done;
+        sp.user_data = rd;
+        void *r = ucp_am_send_nbx(w->ep, priskv_ucp_am_id_resp, NULL, 0, rd, sizeof(*rd), &sp);
+        if (!UCS_PTR_IS_PTR(r)) free(rd);
+    }
+    ucp_destroy_segs(w->segs, w->nsgl);
+    free(w);
+}
+
+static int priskv_ucp_rw_submit(ucp_ep_h ep, priskv_request *req, ucp_rma_seg *segs, uint16_t nsgl,
+                                uint8_t *buf, uint32_t len, void (*end_cb)(void *), void *end_arg,
+                                int is_set)
+{
+    priskv_ucp_rw_work *work = calloc(1, sizeof(*work));
+    if (!work) {
+        return -ENOMEM;
+    }
+    work->ep = ep;
+    work->req = req;
+    work->segs = segs;
+    work->nsgl = nsgl;
+    work->completed = 0;
+    work->buf = buf;
+    work->len = len;
+    work->end_cb = end_cb;
+    work->end_arg = end_arg;
+    uint64_t off = 0;
+    for (uint16_t i = 0; i < nsgl; i++) {
+        size_t slen = segs[i].length;
+        ucp_request_param_t p;
+        memset(&p, 0, sizeof(p));
+        p.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
+        p.cb.send = priskv_ucp_rw_complete_cb;
+        p.user_data = work;
+        if (is_set) {
+            (void)ucp_get_nbx(ep, buf + off, slen, segs[i].addr, segs[i].rkey, &p);
+        } else {
+            (void)ucp_put_nbx(ep, buf + off, slen, segs[i].addr, segs[i].rkey, &p);
+        }
+        off += slen;
+    }
+    struct timeval tv3;
+    gettimeofday(&tv3, NULL);
+    req->runtime.server_data_send_time = tv3;
+    return 0;
+}
+
 
 static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param)
 {
@@ -232,21 +317,17 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
                 priskv_get_key_end(keynode);
                 goto send_resp;
             }
-            uint64_t off = 0;
-            for (uint16_t i = 0; i < nsgl; i++) {
-                size_t len = segs[i].length;
-                void *r = ucp_put_nbx(reply_ep, value_ptr + off, len, segs[i].addr, segs[i].rkey, &rparam);
-                if (UCS_PTR_IS_PTR(r)) {
-                    while (ucp_request_check_status(r) == UCS_INPROGRESS) {
-                        ucp_worker_progress(g_server.worker);
-                    }
-                    ucp_request_free(r);
-                }
-                off += len;
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            req->runtime.server_rw_kv_time = tv;
+            if (priskv_ucp_rw_submit(reply_ep, req, segs, nsgl, value_ptr, valuelen, priskv_get_key_end, keynode, 0) != 0) {
+                resp->status = htobe16(PRISKV_RESP_STATUS_NO_MEM);
+                resp->length = htobe32(0);
+                ucp_destroy_segs(segs, nsgl);
+                priskv_get_key_end(keynode);
+                goto send_resp;
             }
-            priskv_get_key_end(keynode);
-            resp->length = htobe32(valuelen);
-            break;
+            return UCS_OK;
         }
     }
     case PRISKV_COMMAND_SET: {
@@ -275,21 +356,17 @@ static ucs_status_t priskv_ucp_am_req_cb(void *arg, const void *header, size_t h
                 resp->length = htobe32(0);
                 goto send_resp;
             }
-            uint64_t off = 0;
-            for (uint16_t i = 0; i < nsgl; i++) {
-                size_t len = segs[i].length;
-                void *r = ucp_get_nbx(reply_ep, dst + off, len, segs[i].addr, segs[i].rkey, &rparam);
-                if (UCS_PTR_IS_PTR(r)) {
-                    while (ucp_request_check_status(r) == UCS_INPROGRESS) {
-                        ucp_worker_progress(g_server.worker);
-                    }
-                    ucp_request_free(r);
-                }
-                off += len;
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            req->runtime.server_rw_kv_time = tv;
+            if (priskv_ucp_rw_submit(reply_ep, req, segs, nsgl, dst, total_len, priskv_set_key_end, keynode, 1) != 0) {
+                resp->status = htobe16(PRISKV_RESP_STATUS_NO_MEM);
+                resp->length = htobe32(0);
+                ucp_destroy_segs(segs, nsgl);
+                priskv_set_key_end(keynode);
+                goto send_resp;
             }
-            priskv_set_key_end(keynode);
-            resp->length = htobe32(total_len);
-            break;
+            return UCS_OK;
         }
     }
     case PRISKV_COMMAND_DELETE: {
@@ -464,6 +541,7 @@ int priskv_ucp_listen(char **addr, int naddr, int port, void *kv, priskv_ucp_con
     ucp_config_t *config;
     ucs_status_t status = ucp_config_read(NULL, NULL, &config);
     if (status != UCS_OK) {
+        priskv_log_error("priskv_ucp_listen: failed to read config, status %s\n", ucs_status_string(status));
         return -1;
     }
 
@@ -687,23 +765,30 @@ static ucs_status_t priskv_ucp_am_info_req_cb(void *arg, const void *header, siz
         return UCS_OK;
     }
     uint64_t capacity = priskv_get_value_blocks(g_server.kv) * priskv_get_value_block_size(g_server.kv);
-    struct {
-        uint64_t capacity_be;
-        uint16_t max_sgl_be;
-        uint16_t max_key_length_be;
-        uint16_t max_inflight_command_be;
-    } info;
-    info.capacity_be = htobe64(capacity);
-    info.max_sgl_be = htobe16(g_server.default_cap.max_sgl);
-    info.max_key_length_be = htobe16(g_server.default_cap.max_key_length);
-    info.max_inflight_command_be = htobe16(g_server.default_cap.max_inflight_command);
+    priskv_server_capability *cap = malloc(sizeof(*cap));
+    if (!cap) {
+        if (is_rndv) {
+            ucp_am_data_release(g_server.worker, data);
+        }
+        return UCS_ERR_NO_MEMORY;
+    }
+    cap->capacity_be = htobe64(capacity);
+    cap->max_sgl_be = htobe16(g_server.default_cap.max_sgl);
+    cap->max_key_length_be = htobe16(g_server.default_cap.max_key_length);
+    cap->max_inflight_command_be = htobe16(g_server.default_cap.max_inflight_command);
     priskv_log_info("am_info_req_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16 "\n",
                     capacity, g_server.default_cap.max_sgl, g_server.default_cap.max_key_length, g_server.default_cap.max_inflight_command);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));
-    sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
+    sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
     sp.cb.send = priskv_ucp_send_done;
-    (void)ucp_am_send_nbx(ep, priskv_ucp_am_id_info_resp, NULL, 0, &info, sizeof(info), &sp);
+    sp.user_data = cap;
+    void *r = ucp_am_send_nbx(ep, priskv_ucp_am_id_info_resp, NULL, 0, cap, sizeof(*cap), &sp);
+    if (UCS_PTR_IS_ERR(r)) {
+        free(cap);
+    } else if (!UCS_PTR_IS_PTR(r)) {
+        free(cap);
+    }
     if (is_rndv) {
         ucp_am_data_release(g_server.worker, data);
     }

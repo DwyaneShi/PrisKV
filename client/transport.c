@@ -593,7 +593,7 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
                 uint32_t off = 0;
                 while (off + sizeof(priskv_keys_resp) <= len) {
                     priskv_keys_resp *kr = (priskv_keys_resp *)(pbuf + off);
-                    uint16_t klen = kr->keylen;
+                    uint16_t klen = be16toh(kr->keylen);
                     off += sizeof(priskv_keys_resp);
                     if (off + klen > len) break;
                     nkey++;
@@ -604,8 +604,8 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
                 off = 0;
                 for (uint32_t i = 0; i < nkey; i++) {
                     priskv_keys_resp *kr = (priskv_keys_resp *)(pbuf + off);
-                    uint16_t klen = kr->keylen;
-                    uint32_t vlen = kr->valuelen;
+                    uint16_t klen = be16toh(kr->keylen);
+                    uint32_t vlen = be32toh(kr->valuelen);
                     off += sizeof(priskv_keys_resp);
                     keyset->keys[i].key = malloc(klen + 1);
                     memcpy(keyset->keys[i].key, pbuf + off, klen);

@@ -613,12 +613,12 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
                     keyset->keys[i].valuelen = vlen;
                     off += klen;
                 }
-                p->cb(id, (priskv_status)status, keyset);
+                p->cb(p->id, (priskv_status)status, keyset);
             } else {
-                p->cb(id, (priskv_status)status, NULL);
+                p->cb(p->id, (priskv_status)status, NULL);
             }
         } else {
-            p->cb(id, (priskv_status)status, &len);
+            p->cb(p->id, (priskv_status)status, &len);
         }
     }
     pending_req_destroy(impl, p);

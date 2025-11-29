@@ -800,9 +800,9 @@ static ucs_status_t priskv_transport_am_info_req_cb(void *arg, const void *heade
     sp.user_data = cap;
     void *r = ucp_am_send_nbx(ep, priskv_transport_am_id_info_resp, NULL, 0, cap, sizeof(*cap), &sp);
     if (UCS_PTR_IS_ERR(r)) {
-        free(cap);
+        priskv_transport_send_done_cb(NULL, UCS_PTR_STATUS(r), (void *)cap);
     } else if (!UCS_PTR_IS_PTR(r)) {
-        free(cap);
+        priskv_transport_send_done_cb(NULL, UCS_OK, (void *)cap);
     }
     if (is_rndv) {
         ucp_am_data_release(g_server.worker, data);

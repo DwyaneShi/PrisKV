@@ -336,7 +336,7 @@ static int priskv_transport_send_am_req(priskv_client *client, const void *buf, 
     p.cb.send = priskv_transport_send_done_cb;
     p.user_data = (void *)buf;
     void *r = ucp_am_send_nbx(client->impl->ep, priskv_transport_am_id_req, NULL, 0, buf, len, &p);
-    if (UCS_PTR_IS_ERR(r)) { priskv_transport_send_done_cb(NULL, r, (void *)buf); return -1; }
+    if (UCS_PTR_IS_ERR(r)) { priskv_transport_send_done_cb(NULL, UCS_PTR_STATUS(r), (void *)buf); return -1; }
     if (!UCS_PTR_IS_PTR(r)) { priskv_transport_send_done_cb(NULL, UCS_OK, (void *)buf); }
     return 0;
 }

@@ -122,8 +122,8 @@ typedef enum priskv_status {
     /* RDMA disconnected from the server side */
     PRISKV_STATUS_DISCONNECTED = 0xF00,
 
-    /* local RDMA error occurs */
-    PRISKV_STATUS_RDMA_ERROR,
+    /* local transport error occurs */
+    PRISKV_STATUS_TRANSPORT_ERROR,
 
     /* does inflight requests exceed @max_inflight_command? */
     PRISKV_STATUS_BUSY,
@@ -180,8 +180,8 @@ static inline const char *priskv_status_str(priskv_status status)
     case PRISKV_STATUS_DISCONNECTED:
         return "Disconnected";
 
-    case PRISKV_STATUS_RDMA_ERROR:
-        return "RDMA error";
+    case PRISKV_STATUS_TRANSPORT_ERROR:
+        return "Transport error";
 
     case PRISKV_STATUS_BUSY:
         return "Busy";

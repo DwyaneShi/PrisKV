@@ -17,7 +17,6 @@ typedef struct priskv_transport_client_impl {
     ucp_ep_h ep;
     int efd;
     int nqueue;
-    struct pending_req *pendings;
     size_t npending;
     void *keys_buf;
     size_t keys_buf_len;
@@ -69,49 +68,35 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
 static ucs_status_t priskv_transport_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);
 
-static void pend_add(priskv_transport_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
+static pending_req *pending_req_create(priskv_transport_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
 {
-    priskv_log_debug("priskv_pend_add: id %lu, cmd %d, cb %p, sgl %p, nsgl %d, str %s, timeout %lu\n", id, cmd, cb, sgl, nsgl, str, timeout);
-    impl->pendings = realloc(impl->pendings, (impl->npending + 1) * sizeof(pending_req));
-    impl->pendings[impl->npending].id = id;
-    impl->pendings[impl->npending].cmd = cmd;
-    impl->pendings[impl->npending].cb = cb;
-    impl->pendings[impl->npending].sgl = sgl;
-    impl->pendings[impl->npending].nsgl = nsgl;
-    impl->pendings[impl->npending].str = str ? strdup(str) : NULL;
-    impl->pendings[impl->npending].timeout = timeout;
-    impl->pendings[impl->npending].auto_mems = auto_mems;
+    priskv_log_debug("pending_req_create: id %lu, cmd %d, cb %p, sgl %p, nsgl %d, str %s, timeout %lu\n", id, cmd, cb, sgl, nsgl, str, timeout);
+    pending_req *req = malloc(sizeof(pending_req));
+    if (!req) return NULL;
+
+    req->id = id;
+    req->cmd = cmd;
+    req->cb = cb;
+    req->sgl = sgl;
+    req->nsgl = nsgl;
+    req->str = str ? strdup(str) : NULL;
+    req->timeout = timeout;
+    req->auto_mems = auto_mems;
     impl->npending++;
+    return req;
 }
 
-static pending_req *pend_find(priskv_transport_client_impl *impl, uint64_t id)
+static void pending_req_destroy(priskv_transport_client_impl *impl, pending_req *req)
 {
-    priskv_log_debug("priskv_pend_find: id %lu\n", id);
-    for (size_t i = 0; i < impl->npending; i++) {
-        if (impl->pendings[i].id == id) return &impl->pendings[i];
-    }
-    return NULL;
-}
-
-static void pend_remove(priskv_transport_client_impl *impl, uint64_t id)
-{
-    priskv_log_debug("priskv_pend_remove: id %lu\n", id);
-    size_t j = 0;
-    for (size_t i = 0; i < impl->npending; i++) {
-        if (impl->pendings[i].id == id) continue;
-        impl->pendings[j++] = impl->pendings[i];
-    }
-    for (size_t i = j; i < impl->npending; i++) {
-        if (impl->pendings[i].str) free(impl->pendings[i].str);
-        if (impl->pendings[i].auto_mems) {
-            for (uint16_t k = 0; k < impl->pendings[i].nsgl; k++) {
-                if (impl->pendings[i].auto_mems[k]) priskv_dereg_memory(impl->pendings[i].auto_mems[k]);
-            }
-            free(impl->pendings[i].auto_mems);
+    priskv_log_debug("pending_req_destroy: id %lu\n", req->id);
+    if (req->str) free(req->str);
+    if (req->auto_mems) {
+        for (uint16_t k = 0; k < req->nsgl; k++) {
+            if (req->auto_mems[k]) priskv_dereg_memory(req->auto_mems[k]);
         }
+        free(req->auto_mems);
     }
-    impl->npending = j;
-    impl->pendings = realloc(impl->pendings, impl->npending * sizeof(pending_req));
+    impl->npending--;
 }
 
 static priskv_client *priskv_client_new(void)
@@ -347,7 +332,7 @@ static int priskv_transport_send_am_req(priskv_client *client, const void *buf, 
     return 0;
 }
 
-static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl, uint64_t timeout, uint64_t request_id, size_t *out_len)
+static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl, uint64_t timeout, pending_req *preq, size_t *out_len)
 {
     uint16_t keylen = (uint16_t)strlen(key);
     size_t hdr = sizeof(priskv_request) + nsgl * sizeof(priskv_keyed_sgl) + keylen;
@@ -360,7 +345,7 @@ static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *
     uint8_t *buf = malloc(total);
     if (!buf) return NULL;
     priskv_request *req = (priskv_request *)buf;
-    req->request_id = htobe64(request_id);
+    req->request_id = htobe64((uint64_t)preq);
     req->timeout = htobe64(timeout);
     req->command = htobe16(cmd);
     req->nsgl = htobe16(nsgl);
@@ -402,9 +387,10 @@ static int submit_req(priskv_client *client, priskv_req_command cmd, const char 
             }
         }
     }
-    void *buf = priskv_transport_build_req_buf(cmd, str, sgl, nsgl, timeout, request_id, &len);
+    pending_req *req = pending_req_create(client->impl, request_id, cmd, cb, sgl, nsgl, str, timeout, auto_mems);
+    if (!req) return -ENOMEM;
+    void *buf = priskv_transport_build_req_buf(cmd, str, sgl, nsgl, timeout, req, &len);
     if (!buf) return -ENOMEM;
-    pend_add(client->impl, request_id, cmd, cb, sgl, nsgl, str, timeout, auto_mems);
     int rc = priskv_transport_send_am_req(client, buf, len);
     free(buf);
     return rc;
@@ -568,18 +554,8 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
     uint32_t len = be32toh(resp->length);
     priskv_log_debug("priskv_transport_am_resp_cb: recv am resp, id %lu, status %s, length %u\n", id, priskv_resp_status_str(status), len);
 
-    pending_req *p = pend_find(impl, id);
-    if (!p) {
-        priskv_log_error("priskv_transport_am_resp_cb: recv am resp, id %lu not found\n", id);
-        if (is_rndv) {
-            ucp_am_data_release(impl->worker, data);
-        }
-        if (owned_buf) free(owned_buf);
-        return UCS_OK;
-    }
-
-    pend_remove(impl, id);
-    if (p && p->cb) {
+    pending_req *p = (pending_req *)id;
+    if (p->cb) {
         if (p->cmd == PRISKV_COMMAND_KEYS) {
             if (status == PRISKV_RESP_STATUS_VALUE_TOO_BIG) {
                 size_t newlen = len + len / 8;
@@ -636,6 +612,7 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
             p->cb(id, (priskv_status)status, &len);
         }
     }
+    pending_req_destroy(impl, p);
     if (is_rndv) {
         ucp_am_data_release(impl->worker, data);
     }

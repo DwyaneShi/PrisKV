@@ -152,7 +152,6 @@ static void priskv_transport_rw_complete_cb(void *request, ucs_status_t status, 
         rd->status = htobe16(PRISKV_RESP_STATUS_OK);
         rd->length = htobe32(w->len);
         void *r = priskv_transport_am_send(w->ep, priskv_transport_am_id_resp, rd, sizeof(*rd), priskv_transport_send_done_cb, rd);
-        if (!UCS_PTR_IS_PTR(r)) free(rd);
     }
     priskv_transport_destroy_segs(w->segs, w->nsgl);
     free(w);
@@ -204,9 +203,6 @@ int priskv_transport_send_response(ucp_ep_h ep, uint64_t request_id, priskv_resp
     resp->status = htobe16(status);
     resp->length = htobe32(length);
     void *sr = priskv_transport_am_send(ep, priskv_transport_am_id_resp, resp, sizeof(*resp), priskv_transport_send_done_cb, resp);
-    if (!UCS_PTR_IS_PTR(sr)) {
-        free(resp);
-    }
     return 0;
 }
 
@@ -271,7 +267,7 @@ static ucs_status_t priskv_transport_am_req_cb(void *arg, const void *header, si
     uint16_t command = be16toh(req->command);
     uint16_t keyoff = priskv_request_key_off(nsgl);
     uint8_t *keyptr = priskv_request_key(req, nsgl);
-    priskv_log_debug("priskv_transport_am_req_cb: recv am req, id %lu, command %u, key %.*s, nsgl %u, keylen %u\n", request_id, command, keylen, keyptr, nsgl, keylen);
+    priskv_log_debug("priskv_transport_am_req_cb: recv am req, id %lu, command %u, key %s, nsgl %u, keylen %u\n", request_id, command, keylen, keyptr, nsgl, keylen);
 
     priskv_response *resp_dyn = malloc(sizeof(priskv_response));
     priskv_response resp_local = {0};
@@ -522,9 +518,6 @@ send_resp:
     if (segs) priskv_transport_destroy_segs(segs, nsgl);
     if (resp_dyn) {
         void *r = priskv_transport_am_send(reply_ep, priskv_transport_am_id_resp, resp_dyn, sizeof(*resp_dyn), priskv_transport_send_done_cb, resp_dyn);
-        if (!UCS_PTR_IS_PTR(r)) {
-            free(resp_dyn);
-        }
     } else {
         ucp_request_param_t sp2;
         memset(&sp2, 0, sizeof(sp2));
@@ -857,5 +850,11 @@ static void *priskv_transport_am_send(ucp_ep_h ep, uint8_t am_id, const void *pa
     sp.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
     sp.cb.send = cb;
     sp.user_data = user_data;
-    return ucp_am_send_nbx(ep, am_id, NULL, 0, payload, length, &sp);
+    void *r = ucp_am_send_nbx(ep, am_id, NULL, 0, payload, length, &sp);
+    if (UCS_PTR_IS_ERR(r)) {
+        free(user_data);
+    } else if (!UCS_PTR_IS_PTR(r)) {
+        free(user_data);
+    }
+    return r;
 }

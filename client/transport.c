@@ -324,11 +324,14 @@ static int priskv_transport_send_am_req(priskv_client *client, const void *buf, 
 {
     ucp_request_param_t p;
     memset(&p, 0, sizeof(p));
-    p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FIELD_FLAGS;
+    p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FIELD_FLAGS | UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
     p.memory_type = UCS_MEMORY_TYPE_HOST;
     p.flags = UCP_AM_SEND_FLAG_REPLY;
+    p.cb.send = priskv_client_send_done;
+    p.user_data = (void *)buf;
     void *r = ucp_am_send_nbx(client->impl->ep, priskv_transport_am_id_req, NULL, 0, buf, len, &p);
-    if (UCS_PTR_IS_ERR(r)) return -1;
+    if (UCS_PTR_IS_ERR(r)) { free((void *)buf); return -1; }
+    if (!UCS_PTR_IS_PTR(r)) { free((void *)buf); }
     return 0;
 }
 
@@ -346,7 +349,7 @@ static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *
     if (!buf) return NULL;
     priskv_request *req = (priskv_request *)buf;
     uint64_t request_id = (uint64_t)preq;
-    priskv_log_debug("priskv_transport_build_req_buf: cmd %d, key %s, nsgl %d, timeout %lu, request_id %lu", cmd, key, nsgl, timeout, request_id);
+    priskv_log_debug("priskv_transport_build_req_buf: cmd %d, key %s, nsgl %d, timeout %lu, request_id %lu\n", cmd, key, nsgl, timeout, request_id);
 
     req->request_id = htobe64(request_id);
     req->timeout = htobe64(timeout);
@@ -394,9 +397,7 @@ static int submit_req(priskv_client *client, priskv_req_command cmd, const char 
     if (!req) return -ENOMEM;
     void *buf = priskv_transport_build_req_buf(cmd, str, sgl, nsgl, timeout, req, &len);
     if (!buf) return -ENOMEM;
-    int rc = priskv_transport_send_am_req(client, buf, len);
-    free(buf);
-    return rc;
+    return priskv_transport_send_am_req(client, buf, len);
 }
 
 static int ensure_keys_buffer(priskv_transport_client_impl *impl, priskv_client *client)
@@ -578,7 +579,6 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
                 void *buf = priskv_transport_build_req_buf(PRISKV_COMMAND_KEYS, p->str, &sgl, 1, 0, id, &slen);
                 if (buf) {
                     priskv_transport_send_am_req(impl->owner, buf, slen);
-                    free(buf);
                 }
             } else if (status == PRISKV_RESP_STATUS_OK) {
                 priskv_keyset *keyset = calloc(1, sizeof(priskv_keyset));
@@ -636,4 +636,9 @@ static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
         ucp_request_free(req);
     }
     (void)impl;
+}
+static void priskv_client_send_done(void *request, ucs_status_t status, void *user_data)
+{
+    if (user_data) free(user_data);
+    if (request) ucp_request_free(request);
 }

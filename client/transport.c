@@ -63,7 +63,7 @@ static uint8_t priskv_transport_am_id_info_resp = 4;
 
 static int priskv_transport_send_am_req(priskv_client *client, const void *buf, size_t len);
 static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *key, priskv_sgl *sgl, uint16_t nsgl,
-                           uint64_t timeout, uint64_t request_id, size_t *out_len);
+                           uint64_t timeout, pending_req *preq, size_t *out_len);
 static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 static ucs_status_t priskv_transport_am_info_cb(void *arg, const void *header, size_t header_length, void *data, size_t length, const ucp_am_recv_param_t *param);
 static void priskv_client_ep_err_cb(void *arg, ucp_ep_h ep, ucs_status_t status);

@@ -566,7 +566,7 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
     uint64_t id = be64toh(resp->request_id);
     uint16_t status = be16toh(resp->status);
     uint32_t len = be32toh(resp->length);
-    priskv_log_debug("priskv_transport_am_resp_cb: recv am resp, id %lu, status %u, length %u\n", id, status, len);
+    priskv_log_debug("priskv_transport_am_resp_cb: recv am resp, id %lu, status %s, length %u\n", id, priskv_resp_status_str(status), len);
 
     pending_req *p = pend_find(impl, id);
     if (!p) {
@@ -578,6 +578,7 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
         return UCS_OK;
     }
 
+    pend_remove(impl, id);
     if (p && p->cb) {
         if (p->cmd == PRISKV_COMMAND_KEYS) {
             if (status == PRISKV_RESP_STATUS_VALUE_TOO_BIG) {
@@ -628,14 +629,11 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
                     off += klen;
                 }
                 p->cb(id, (priskv_status)status, keyset);
-                pend_remove(impl, id);
             } else {
                 p->cb(id, (priskv_status)status, NULL);
-                pend_remove(impl, id);
             }
         } else {
             p->cb(id, (priskv_status)status, &len);
-            pend_remove(impl, id);
         }
     }
     if (is_rndv) {

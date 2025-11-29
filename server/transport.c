@@ -796,7 +796,7 @@ static ucs_status_t priskv_transport_am_info_req_cb(void *arg, const void *heade
     cap->max_sgl_be = htobe16(g_server.default_cap.max_sgl);
     cap->max_key_length_be = htobe16(g_server.default_cap.max_key_length);
     cap->max_inflight_command_be = htobe16(g_server.default_cap.max_inflight_command);
-    priskv_log_info("am_info_req_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16 "\n",
+    priskv_log_info("priskv_transport_am_info_req_cb: capacity %" PRIu64 ", max_sgl %" PRIu16 ", max_key_length %" PRIu16 ", max_inflight_command %" PRIu16 "\n",
                     capacity, g_server.default_cap.max_sgl, g_server.default_cap.max_key_length, g_server.default_cap.max_inflight_command);
     ucp_request_param_t sp;
     memset(&sp, 0, sizeof(sp));

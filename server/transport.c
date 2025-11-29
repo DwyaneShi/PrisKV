@@ -517,7 +517,7 @@ static ucs_status_t priskv_transport_am_req_cb(void *arg, const void *header, si
 send_resp:
     if (segs) priskv_transport_destroy_segs(segs, nsgl);
     if (resp_dyn) {
-        void *r = priskv_transport_am_send(reply_ep, priskv_transport_am_id_resp, resp_dyn, sizeof(*resp_dyn), priskv_transport_send_done_cb, resp_dyn);
+        priskv_transport_am_send(reply_ep, priskv_transport_am_id_resp, resp_dyn, sizeof(*resp_dyn), priskv_transport_send_done_cb, resp_dyn);
     } else {
         ucp_request_param_t sp2;
         memset(&sp2, 0, sizeof(sp2));
@@ -852,9 +852,9 @@ static void *priskv_transport_am_send(ucp_ep_h ep, uint8_t am_id, const void *pa
     sp.user_data = user_data;
     void *r = ucp_am_send_nbx(ep, am_id, NULL, 0, payload, length, &sp);
     if (UCS_PTR_IS_ERR(r)) {
-        free(user_data);
+        cb(NULL, r, user_data);
     } else if (!UCS_PTR_IS_PTR(r)) {
-        free(user_data);
+        cb(NULL, UCS_OK, user_data);
     }
     return r;
 }

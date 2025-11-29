@@ -320,7 +320,7 @@ void priskv_dereg_memory(priskv_memory *mem)
     free(mem);
 }
 
-static void priskv_client_send_done_cb(void *request, ucs_status_t status, void *user_data)
+static void priskv_transport_send_done_cb(void *request, ucs_status_t status, void *user_data)
 {
     if (user_data) free(user_data);
     if (request) ucp_request_free(request);
@@ -333,11 +333,11 @@ static int priskv_transport_send_am_req(priskv_client *client, const void *buf, 
     p.op_attr_mask = UCP_OP_ATTR_FIELD_MEMORY_TYPE | UCP_OP_ATTR_FIELD_FLAGS | UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
     p.memory_type = UCS_MEMORY_TYPE_HOST;
     p.flags = UCP_AM_SEND_FLAG_REPLY;
-    p.cb.send = priskv_client_send_done_cb;
+    p.cb.send = priskv_transport_send_done_cb;
     p.user_data = (void *)buf;
     void *r = ucp_am_send_nbx(client->impl->ep, priskv_transport_am_id_req, NULL, 0, buf, len, &p);
-    if (UCS_PTR_IS_ERR(r)) { free((void *)buf); return -1; }
-    if (!UCS_PTR_IS_PTR(r)) { free((void *)buf); }
+    if (UCS_PTR_IS_ERR(r)) { priskv_transport_send_done_cb(NULL, r, (void *)buf); return -1; }
+    if (!UCS_PTR_IS_PTR(r)) { priskv_transport_send_done_cb(NULL, UCS_OK, (void *)buf); }
     return 0;
 }
 

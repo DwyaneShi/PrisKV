@@ -355,7 +355,7 @@ static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *
     if (!buf) return NULL;
     priskv_request *req = (priskv_request *)buf;
     uint64_t request_id = (uint64_t)preq;
-    priskv_log_debug("priskv_transport_build_req_buf: cmd %d, key %s, nsgl %d, timeout %lu, request_id %lu\n", cmd, key, nsgl, timeout, request_id);
+    priskv_log_debug("priskv_transport_build_req_buf: cmd %d, key %.*s, nsgl %d, timeout %lu, request_id %lu\n", cmd, key, nsgl, timeout, request_id);
 
     req->request_id = htobe64(request_id);
     req->timeout = htobe64(timeout);

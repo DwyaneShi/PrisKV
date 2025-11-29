@@ -322,6 +322,12 @@ void priskv_dereg_memory(priskv_memory *mem)
 
 static void priskv_transport_send_done_cb(void *request, ucs_status_t status, void *user_data)
 {
+    if (status != UCS_OK) {
+        priskv_log_error("priskv_transport_send_done_cb: send failed, status %s\n", ucs_status_string(status));
+    } else {
+        priskv_log_debug("priskv_transport_send_done_cb: ok\n");
+    }
+
     if (user_data) free(user_data);
     if (request) ucp_request_free(request);
 }

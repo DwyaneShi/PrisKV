@@ -818,13 +818,8 @@ static void priskv_transport_send_done_cb(void *request, ucs_status_t status, vo
         priskv_log_debug("priskv_transport_send_done_cb: ok\n");
     }
 
-    if (user_data) {
-        free(user_data);
-    }
-
-    if (request) {
-        ucp_request_free(request);
-    }
+    if (user_data) free(user_data);
+    if (request) ucp_request_free(request);
 }
 
 static void priskv_transport_ep_err_cb(void *a, ucp_ep_h ep, ucs_status_t status)

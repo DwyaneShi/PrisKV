@@ -852,7 +852,7 @@ static void *priskv_transport_am_send(ucp_ep_h ep, uint8_t am_id, const void *pa
     sp.user_data = user_data;
     void *r = ucp_am_send_nbx(ep, am_id, NULL, 0, payload, length, &sp);
     if (UCS_PTR_IS_ERR(r)) {
-        cb(NULL, r, user_data);
+        cb(NULL, UCS_PTR_STATUS(r), user_data);
     } else if (!UCS_PTR_IS_PTR(r)) {
         cb(NULL, UCS_OK, user_data);
     }

@@ -111,10 +111,6 @@ static pending_req *pending_req_create(priskv_transport_client_impl *impl, uint6
     req->timeout = timeout;
     req->auto_mems = auto_mems;
     impl->npending++;
-
-    struct timeval client_metadata_send_time;
-    gettimeofday(&client_metadata_send_time, NULL);
-    req->runtime.client_metadata_send_time = client_metadata_send_time;
     return req;
 }
 
@@ -437,6 +433,11 @@ static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *
     req->command = htobe16(cmd);
     req->nsgl = htobe16(nsgl);
     req->key_length = htobe16(keylen);
+
+    struct timeval client_metadata_send_time;
+    gettimeofday(&client_metadata_send_time, NULL);
+    req->runtime.client_metadata_send_time = client_metadata_send_time;
+
     for (uint16_t i = 0; i < nsgl; i++) {
         req->sgls[i].addr = htobe64(sgl[i].iova);
         req->sgls[i].length = htobe32(sgl[i].length);

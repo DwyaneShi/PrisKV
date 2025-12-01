@@ -401,6 +401,7 @@ static ucs_status_t priskv_transport_am_req_cb(void *arg, const void *header, si
             if (rc != PRISKV_RESP_STATUS_OK) {
                 resp->status = htobe16(rc);
                 resp->length = htobe32(0);
+                priskv_get_key_end(keynode);
                 break;
             }
             if (total_len < valuelen) {
@@ -453,6 +454,7 @@ static ucs_status_t priskv_transport_am_req_cb(void *arg, const void *header, si
             if (rc != PRISKV_RESP_STATUS_OK || !keynode) {
                 resp->status = htobe16(rc);
                 resp->length = htobe32(0);
+                priskv_set_key_end(keynode);
                 break;
             }
             struct timeval tv;

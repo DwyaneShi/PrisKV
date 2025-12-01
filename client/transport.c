@@ -31,6 +31,10 @@ typedef struct priskv_transport_client_impl {
     uint64_t keys_running_id;
     struct delayed_req { void *buf; size_t len; } *delayed;
     size_t ndelayed;
+    uint64_t stats[PRISKV_COMMAND_MAX];
+    uint64_t resps;
+    char local_addr_str[64];
+    char peer_addr_str[64];
 } priskv_transport_client_impl;
 
 struct priskv_client {
@@ -107,6 +111,10 @@ static pending_req *pending_req_create(priskv_transport_client_impl *impl, uint6
     req->timeout = timeout;
     req->auto_mems = auto_mems;
     impl->npending++;
+
+    struct timeval client_metadata_send_time;
+    gettimeofday(&client_metadata_send_time, NULL);
+    req->runtime.client_metadata_send_time = client_metadata_send_time;
     return req;
 }
 
@@ -263,6 +271,13 @@ priskv_client *priskv_connect(const char *raddr, int rport, const char *laddr, i
     }
     impl->owner = client;
     client->impl = impl;
+    snprintf(impl->peer_addr_str, sizeof(impl->peer_addr_str), "%s:%d", raddr, rport);
+    if (laddr) {
+        snprintf(impl->local_addr_str, sizeof(impl->local_addr_str), "%s:%d", laddr, lport);
+    } else {
+        strncpy(impl->local_addr_str, "unknown", sizeof(impl->local_addr_str)-1);
+        impl->local_addr_str[sizeof(impl->local_addr_str)-1] = '\0';
+    }
     {
         ucp_request_param_t p;
         memset(&p, 0, sizeof(p));
@@ -285,6 +300,14 @@ void priskv_close(priskv_client *client)
 {
     if (!client || !client->impl) return;
     priskv_transport_client_impl *impl = client->impl;
+    char local_addr[64] = {0}, peer_addr[64] = {0};
+    strncpy(local_addr, impl->local_addr_str, sizeof(local_addr)-1);
+    strncpy(peer_addr, impl->peer_addr_str, sizeof(peer_addr)-1);
+    priskv_log_notice("UCP: <%s - %s> close. Requests GET %lu, SET %lu, TEST %lu, DELETE %lu, Responses %lu\n",
+                      local_addr, peer_addr,
+                      impl->stats[PRISKV_COMMAND_GET], impl->stats[PRISKV_COMMAND_SET], impl->stats[PRISKV_COMMAND_TEST],
+                      impl->stats[PRISKV_COMMAND_DELETE], impl->resps);
+
     if (impl->ep) {
         ucp_ep_destroy(impl->ep);
     }
@@ -488,6 +511,7 @@ static int submit_req(priskv_client *client, priskv_req_command cmd, const char 
     void *buf = priskv_transport_build_req_buf(cmd, key, sgl, nsgl, timeout, req, &len);
     if (!buf) {
         priskv_log_error("submit_req: build req buf failed\n");
+        pending_req_destroy(impl, req);
         return -ENOMEM;
     }
     if (impl->npending >= impl->max_inflight_command) {
@@ -498,6 +522,7 @@ static int submit_req(priskv_client *client, priskv_req_command cmd, const char 
         priskv_log_debug("submit_req: max_inflight_command %d reached, delay request %d, request_id 0x%lx\n", impl->max_inflight_command, impl->ndelayed, request_id);
         return -EAGAIN;
     }
+    impl->stats[cmd]++;
     return priskv_transport_send_am_req(client, buf, len);
 }
 
@@ -592,6 +617,7 @@ static ucs_status_t priskv_transport_am_info_cb(void *arg, const void *header, s
     int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
     uint8_t *msg = (uint8_t *)data;
     uint8_t *owned_buf = NULL;
+    impl->resps++;
     if (is_rndv) {
         priskv_log_debug("priskv_transport_am_info_cb: AM recv rndv data, length %zu\n", length);
         owned_buf = (uint8_t *)malloc(length);
@@ -631,6 +657,7 @@ static ucs_status_t priskv_transport_am_resp_cb(void *arg, const void *header, s
 {
     priskv_log_debug("priskv_transport_am_resp_cb: recv am resp, length %zu\n", length);
     priskv_transport_client_impl *impl = (priskv_transport_client_impl *)arg;
+    impl->resps++;
     uint32_t recv_attr = param->recv_attr;
     int is_rndv = !!(recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV);
     uint8_t *msg = (uint8_t *)data;

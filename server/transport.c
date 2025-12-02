@@ -248,8 +248,12 @@ static int priskv_transport_rw_submit(ucp_ep_h ep, priskv_request *req, priskv_t
         size_t slen = segs[i].length;
         ucp_request_param_t p;
         memset(&p, 0, sizeof(p));
-        p.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK | UCP_OP_ATTR_FIELD_USER_DATA;
-        p.cb.send = priskv_transport_rw_complete_cb;
+        uint16_t need_cb = (i == nsgl - 1);
+        p.op_attr_mask = UCP_OP_ATTR_FIELD_USER_DATA;
+        if (need_cb) {
+            p.op_attr_mask |= UCP_OP_ATTR_FIELD_CALLBACK;
+            p.cb.send = priskv_transport_rw_complete_cb;
+        }
         p.user_data = work;
         void *r = NULL;
         if (is_set) {
@@ -259,7 +263,8 @@ static int priskv_transport_rw_submit(ucp_ep_h ep, priskv_request *req, priskv_t
         }
         if (UCS_PTR_IS_ERR(r)) {
             priskv_transport_rw_complete_cb(NULL, UCS_PTR_STATUS(r), (void *)work);
-        } else if (!UCS_PTR_IS_PTR(r)) {
+            break;
+        } else if (!UCS_PTR_IS_PTR(r) && need_cb) {
             priskv_transport_rw_complete_cb(NULL, UCS_OK, (void *)work);
         }
         off += slen;

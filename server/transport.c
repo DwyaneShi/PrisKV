@@ -346,7 +346,13 @@ static ucs_status_t priskv_transport_am_req_cb(void *arg, const void *header, si
     uint16_t command = be16toh(req->command);
     uint16_t keyoff = priskv_request_key_off(nsgl);
     uint8_t *keyptr = priskv_request_key(req, nsgl);
-    priskv_log_debug("priskv_transport_am_req_cb: recv am req, id %lu, command %s[0x%x], key %.*s, nsgl %u, keylen %u\n", request_id, priskv_command_str(command), command, keylen, keyptr, nsgl, keylen);
+
+    if (priskv_get_log_level() >= priskv_log_debug) {
+        char key_short[16] = {0};
+        priskv_string_shorten(keyptr, keylen, key_short, sizeof(key_short));
+        uint16_t key_short_len = (uint16_t)strlen(key_short);
+        priskv_log_debug("priskv_transport_am_req_cb: recv am req, id %lu, command %s[0x%x], key %.*s, nsgl %u, keylen %u\n", request_id, priskv_command_str(command), command, key_short_len, key_short, nsgl, keylen);
+    }
 
     priskv_response *resp_dyn = malloc(sizeof(priskv_response));
     priskv_response resp_local = {0};

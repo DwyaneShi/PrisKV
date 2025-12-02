@@ -98,7 +98,12 @@ static int priskv_build_check(void)
 
 static pending_req *pending_req_create(priskv_transport_client_impl *impl, uint64_t id, priskv_req_command cmd, priskv_generic_cb cb, priskv_sgl *sgl, uint16_t nsgl, const char *str, uint64_t timeout, priskv_memory **auto_mems)
 {
-    priskv_log_debug("pending_req_create: id %lu, cmd %d, cb %p, sgl %p, nsgl %d, str %s, timeout %lu\n", id, cmd, cb, sgl, nsgl, str, timeout);
+    if (priskv_get_log_level() >= priskv_log_debug) {
+        char str_short[16] = {0};
+        uint16_t keylen = (uint16_t)strlen(str);
+        priskv_string_shorten(str, keylen, str_short, sizeof(str_short));
+        priskv_log_debug("pending_req_create: id %lu, cmd %d, cb %p, sgl %p, nsgl %d, str %s, timeout %lu\n", id, cmd, cb, sgl, nsgl, str_short, timeout);
+    }
     pending_req *req = malloc(sizeof(pending_req));
     if (!req) return NULL;
 
@@ -426,7 +431,14 @@ static void *priskv_transport_build_req_buf(priskv_req_command cmd, const char *
     if (!buf) return NULL;
     priskv_request *req = (priskv_request *)buf;
     uint64_t request_id = (uint64_t)preq;
-    priskv_log_debug("priskv_transport_build_req_buf: cmd %d, key %.*s, nsgl %d, timeout %lu, request_id %lu\n", cmd, keylen, key, nsgl, timeout, request_id);
+        
+    if (priskv_get_log_level() >= priskv_log_debug) {
+        char key_short[16] = {0};
+        uint16_t keylen = (uint16_t)strlen(key);
+        priskv_string_shorten(key, keylen, key_short, sizeof(key_short));
+        uint16_t key_short_len = (uint16_t)strlen(key_short);
+        priskv_log_debug("priskv_transport_build_req_buf: cmd %d, key %.*s, nsgl %d, timeout %lu, request_id %lu\n", cmd, key_short_len, key_short, nsgl, timeout, request_id);
+    }
 
     req->request_id = htobe64(request_id);
     req->timeout = htobe64(timeout);
@@ -464,13 +476,16 @@ static int submit_req(priskv_client *client, priskv_req_command cmd, const char 
                       uint64_t request_id, priskv_generic_cb cb)
 {
     priskv_transport_client_impl *impl = client->impl;
-    char key_short[16] = {0};
-    uint16_t keylen = (uint16_t)strlen(key);
-    priskv_string_shorten(key, keylen, key_short, sizeof(key_short));
 
-    priskv_log_debug(
-        "submit_req: request_id 0x%lx, %s[0x%x], nsgl %u, key[%u] %s\n",
-        request_id, priskv_command_str(cmd), cmd, nsgl, keylen, key_short);
+    if (priskv_get_log_level() >= priskv_log_debug) {
+        char key_short[16] = {0};
+        uint16_t keylen = (uint16_t)strlen(key);
+        priskv_string_shorten(key, keylen, key_short, sizeof(key_short));
+
+        priskv_log_debug(
+            "submit_req: request_id 0x%lx, %s[0x%x], nsgl %u, key[%u] %s\n",
+            request_id, priskv_command_str(cmd), cmd, nsgl, keylen, key_short);
+    }
 
     if (cmd == PRISKV_COMMAND_KEYS) {
         if (impl->keys_running_id && impl->keys_running_id != request_id) {

@@ -23,12 +23,22 @@
 #   Enhua Zhou <zhouenhua@bytedance.com>
 
 from setuptools import setup, find_packages
+import subprocess
+import shlex
 try:
     from pybind11.setup_helpers import Pybind11Extension
 except ImportError:
     from setuptools import Extension as Pybind11Extension
 
-# LIBS = ["rdmacm", "ibverbs"]
+def _pkgcfg(name, flag):
+    try:
+        out = subprocess.check_output(['pkg-config', flag, name], universal_newlines=True)
+        return shlex.split(out.strip())
+    except Exception:
+        return []
+
+UCX_CFLAGS = _pkgcfg('ucx', '--cflags')
+UCX_LDFLAGS = _pkgcfg('ucx', '--libs')
 ext_modules = [
     Pybind11Extension(
         "priskv._priskv._priskv_client",
@@ -37,8 +47,8 @@ ext_modules = [
         extra_link_args=[
             "-Wl,--start-group", "../cluster/client/libpriskvcluster.a",
             "-Wl,--end-group", "-lrdmacm", "-libverbs", "-lhiredis"
-        ],
-        extra_compile_args=["-g", "-O0", "-std=c++11"],
+        ] + UCX_LDFLAGS,
+        extra_compile_args=["-g", "-O0", "-std=c++11"] + UCX_CFLAGS,
     ),
 ]
 
@@ -47,9 +57,10 @@ setup(
     version='0.0.2',
     description=
     '''This is priskv's client. priskv is specifically designed for modern high-performance '''
-    '''computing (HPC) and artificial intelligence (AI) computing. It solely supports RDMA. '''
-    '''priskv also supports GDR (GPU Direct RDMA), enabling the value of a key to be directly '''
-    '''transferred between priskv and the GPU.''',
+    '''computing (HPC) and artificial intelligence (AI) computing. It supports common '''
+    '''transport protocols, including RDMA, TCP, and shared memory, to enable efficient '''
+    '''communication for different scenarios. priskv also supports GDR (GPU Direct RDMA), '''
+    '''enabling the value of a key to be directly transferred between priskv and the GPU.''',
     # package_data={
     #     'priskv._priskv': ['*.pyi', '*.so'],
     # },

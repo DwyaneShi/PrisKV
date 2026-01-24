@@ -8,6 +8,7 @@ import random
 import signal
 import sys
 import traceback
+import tempfile
 
 server_process = None
 client_process = None
@@ -81,14 +82,40 @@ def signal_handler(signum, frame):
 def create_memfile():
     global mem_file_path
     mem_file_name = f"memfile_{int(time.time())}_{random.randint(0,99999)}"
-    mem_file_path = f"/run/{mem_file_name}"
+    def _tmpfs_path(name: str) -> str:
+        uid = os.getuid()
+        candidates = []
+        try:
+            with open("/proc/mounts") as f:
+                mounts = [line.split() for line in f]
+            tmpfs_mounts = {m[1] for m in mounts if len(m) >= 3 and m[2] == "tmpfs"}
+            user_run = f"/run/user/{uid}"
+            if user_run in tmpfs_mounts and os.path.isdir(user_run) and os.access(user_run, os.W_OK):
+                candidates.append(user_run)
+            if "/dev/shm" in tmpfs_mounts and os.access("/dev/shm", os.W_OK):
+                candidates.append("/dev/shm")
+            if "/run" in tmpfs_mounts and os.access("/run", os.W_OK):
+                candidates.append("/run")
+            for m in tmpfs_mounts:
+                if os.access(m, os.W_OK):
+                    candidates.append(m)
+        except Exception:
+            pass
+        for base in candidates:
+            return os.path.join(base, name)
+        for base in (f"/run/user/{uid}", "/dev/shm", "/run"):
+            if os.path.isdir(base) and os.access(base, os.W_OK):
+                return os.path.join(base, name)
+        return os.path.join(tempfile.gettempdir(), name)
+    mem_file_path = _tmpfs_path(mem_file_name)
 
     subprocess.run([
         "./server/priskv-memfile", "-o", "create", "-f", mem_file_path,
         "--max-keys", "1024", "--max-key-length", "128", "--value-block-size",
         "4096", "--value-blocks", "4096"
     ],
-                   stdout=subprocess.DEVNULL)
+                   stdout=subprocess.DEVNULL,
+                   check=True)
 
 
 def destroy_memfile():
@@ -160,15 +187,30 @@ def priskv_e2e_test():
     print("---- E2E TEST ----")
 
     port = random.randint(24300, 24500)
+
+    print("---- E2E TEST (RDMA) ----")
     rdma_ip = find_rdma_dev()
     if rdma_ip is None:
-        print("---- No RDMA IP, SKIP E2E TEST ----")
-        return 0
+        print("---- No RDMA IP, SKIP E2E TEST OVER RDMA ----")
+    else:
+        priskv_e2e_test_run(rdma_ip, port)
 
+    ucx_wireup_ip = "0.0.0.0"
+    os.environ["PRISKV_TRANSPORT"] = "ucx"
+
+    print("---- E2E TEST (UCX TCP) ----")
+    os.environ["UCX_TLS"] = "tcp"
+    priskv_e2e_test_run(ucx_wireup_ip, port)
+
+    print("---- E2E TEST (UCX SM) ----")
+    os.environ["UCX_TLS"] = "sm"
+    priskv_e2e_test_run(ucx_wireup_ip, port)
+
+def priskv_e2e_test_run(ip, port):
     create_memfile()
     print("---- E2E TEST: create memfile [OK] ----")
     try:
-        create_server(rdma_ip, port)
+        create_server(ip, port)
 
         # wait for server ready
         time.sleep(10)
@@ -176,7 +218,7 @@ def priskv_e2e_test():
         value = 456
 
         # step 1, get key from empty KV
-        ret = do_test(rdma_ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
+        ret = do_test(ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
         if ret != 0:
             print("---- E2E TEST: get key from empty KV [FAILED] ----")
             return ret
@@ -184,7 +226,7 @@ def priskv_e2e_test():
         print("---- E2E TEST: get key from empty KV [OK] ----")
 
         # step 2, set key to empty KV
-        ret = do_test(rdma_ip, port, f"set {key} {value}", STATUS_OK)
+        ret = do_test(ip, port, f"set {key} {value}", STATUS_OK)
         if ret != 0:
             print("---- E2E TEST: set key to empty KV [FAILED] ----")
             return ret
@@ -192,7 +234,7 @@ def priskv_e2e_test():
         print("---- E2E TEST: set key to empty KV [OK] ----")
 
         ## step 3, verify key from filled KV
-        ret = do_test(rdma_ip, port, f"get {key}", STATUS_OK, str(value))
+        ret = do_test(ip, port, f"get {key}", STATUS_OK, str(value))
         if ret != 0:
             print("---- E2E TEST: verify key from filled KV [FAILED] ----")
             return ret
@@ -200,7 +242,7 @@ def priskv_e2e_test():
         print("---- E2E TEST: verify key from filled KV [OK] ----")
 
         # step 4, delete key from filled KV
-        ret = do_test(rdma_ip, port, f"delete {key}", STATUS_OK)
+        ret = do_test(ip, port, f"delete {key}", STATUS_OK)
         if ret != 0:
             print("---- E2E TEST: delete key from filled KV [FAILED] ----")
             return ret
@@ -208,7 +250,7 @@ def priskv_e2e_test():
         print("---- E2E TEST: delete key from filled KV [OK] ----")
 
         # step 5, get key from empty KV
-        ret = do_test(rdma_ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
+        ret = do_test(ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
         if ret != 0:
             print("---- E2E TEST: get key from empty KV [FAILED] ----")
             return ret
@@ -216,7 +258,7 @@ def priskv_e2e_test():
         print("---- E2E TEST: get key from empty KV [OK] ----")
 
         # step 6, set key with timeout 5s
-        ret = do_test(rdma_ip, port, f"set {key} {value} EX 5", STATUS_OK)
+        ret = do_test(ip, port, f"set {key} {value} EX 5", STATUS_OK)
         if ret != 0:
             print("---- E2E TEST: set key with timeuot 5s [FAILED] ----")
             return ret
@@ -225,7 +267,7 @@ def priskv_e2e_test():
 
         # step 7, get key from kv before expired and compare value
         time.sleep(3)
-        ret = do_test(rdma_ip, port, f"get {key}", STATUS_OK, str(value))
+        ret = do_test(ip, port, f"get {key}", STATUS_OK, str(value))
         if ret != 0:
             print(
                 "---- E2E TEST: verify key from filled KV before expired [FAILED] ----"
@@ -238,7 +280,7 @@ def priskv_e2e_test():
 
         # step 8, get key after expired
         time.sleep(5)
-        ret = do_test(rdma_ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
+        ret = do_test(ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
         if ret != 0:
             print("---- E2E TEST: get key after expired [FAILED]----")
             return ret
@@ -246,7 +288,7 @@ def priskv_e2e_test():
         print("---- E2E TEST: get key after expired [OK] ----")
 
         # step 9, set key to empty KV without timeout
-        ret = do_test(rdma_ip, port, f"set {key} {value}", STATUS_OK)
+        ret = do_test(ip, port, f"set {key} {value}", STATUS_OK)
         if ret != 0:
             print(
                 "---- E2E TEST: set key to empty KV without timeout [FAILED]----"
@@ -257,7 +299,7 @@ def priskv_e2e_test():
 
         # step 10, get keys from KV and compare values after a while
         time.sleep(7)
-        ret = do_test(rdma_ip, port, f"get {key}", STATUS_OK, str(value))
+        ret = do_test(ip, port, f"get {key}", STATUS_OK, str(value))
         if ret != 0:
             print("---- E2E TEST: verify keys from filled KV [FAILED]----")
             return ret
@@ -265,7 +307,7 @@ def priskv_e2e_test():
         print("---- E2E TEST: verify keys from filled KV [OK] ----")
 
         # step 11, set expire time 5s
-        ret = do_test(rdma_ip, port, f"expire {key} 5", STATUS_OK)
+        ret = do_test(ip, port, f"expire {key} 5", STATUS_OK)
         if ret != 0:
             print("---- E2E TEST: set expire time 5s [FAILED] ----")
             return ret
@@ -274,7 +316,7 @@ def priskv_e2e_test():
 
         # step 12, get keys from empty KV
         time.sleep(7)
-        ret = do_test(rdma_ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
+        ret = do_test(ip, port, f"get {key}", STATUS_NO_SUCH_KEY)
         if ret != 0:
             print("---- E2E TEST: get keys from empty KV [FAILED] ----")
             return ret

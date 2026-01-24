@@ -4,9 +4,10 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 PrisKV is specifically designed for modern high-performance computing (HPC) and
-artificial intelligence (AI) computing. It solely supports RDMA. PrisKV also
-supports GDR (GPU Direct RDMA), enabling the value of a key to be directly
-transferred between PrisKV and the GPU.
+artificial intelligence (AI) computing. It supports common transport protocols,
+including RDMA, TCP, and shared memory, to enable efficient communication for
+different scenarios. PrisKV also supports GDR (GPU Direct RDMA), enabling the
+value of a key to be directly transferred between PrisKV and the GPU.
 
 ## How to Build
 

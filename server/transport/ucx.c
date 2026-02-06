@@ -33,6 +33,7 @@
 #include "../backend/backend.h"
 #include "priskv-protocol.h"
 #include "priskv-protocol-helper.h"
+#include "priskv-config.h"
 #include "priskv-log.h"
 #include "priskv-utils.h"
 #include "priskv-threads.h"
@@ -282,53 +283,16 @@ out_free_msg:
     return ret;
 }
 
-static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
+static inline int priskv_ucx_handle_handshake(void *arg)
 {
-    priskv_log_debug("UCX: listener efd progress event %d, listener %p, efd %d\n", ev, opaque, fd);
-
-    priskv_transport_conn *listener = opaque;
     int ret;
-    struct sockaddr_storage client_addr;
-    socklen_t client_addr_len;
-    int connfd;
-    char peer_addr[PRISKV_ADDR_LEN];
     priskv_cm_ucx_handshake peer_hs;
     priskv_cm_status status;
+
     uint64_t value = 0;
     uint8_t *peer_worker_address = NULL;
-
-    assert(listener->listenfd == fd);
-
-    client_addr_len = sizeof(client_addr);
-    connfd = accept(listener->listenfd, (struct sockaddr *)&client_addr, &client_addr_len);
-    if (connfd < 0) {
-        priskv_log_error("UCX: accept on listenfd %d failed: %m\n", listener->listenfd);
-        return;
-    }
-
-    priskv_inet_ntop(&client_addr, peer_addr);
-    priskv_log_info("UCX: accept on listenfd %d, connfd %d, client addr %s\n", listener->listenfd,
-                    connfd, peer_addr);
-
-    priskv_transport_conn *client = calloc(1, sizeof(priskv_transport_conn));
-    assert(client);
-    client->ep = NULL;
-    client->inflight_reqs = NULL;
-    client->c.listener = listener;
-    client->c.thread = NULL;
-    client->c.closing = false;
-    client->connfd = connfd;
-    list_node_init(&client->c.node);
-    pthread_spin_init(&client->lock, 0);
-
-    const char *local_addr = listener->local_addr;
-    snprintf(client->local_addr, PRISKV_ADDR_LEN, "%s", local_addr);
-    snprintf(client->peer_addr, PRISKV_ADDR_LEN, "%s", peer_addr);
-
-    pthread_spin_lock(&listener->lock);
-    list_add_tail(&listener->s.head, &client->c.node);
-    listener->s.nclients++;
-    pthread_spin_unlock(&listener->lock);
+    priskv_transport_conn *client = arg;
+    int connfd = client->connfd;
 
     /* #step0, recv handshake msg */
     ret = priskv_safe_recv(connfd, &peer_hs, sizeof(peer_hs), NULL, NULL);
@@ -361,9 +325,9 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
 
     priskv_log_info("UCX: <%s - %s> incoming connect request - version %d, max_sgl %d, "
                     "max_key_length %d, max_inflight_command %d, address_len %d\n",
-                    local_addr, peer_addr, client->conn_cap.version, client->conn_cap.max_sgl,
-                    client->conn_cap.max_key_length, client->conn_cap.max_inflight_command,
-                    peer_worker_address_len);
+                    client->local_addr, client->peer_addr, client->conn_cap.version,
+                    client->conn_cap.max_sgl, client->conn_cap.max_key_length,
+                    client->conn_cap.max_inflight_command, peer_worker_address_len);
 
     if (client->conn_cap.version != PRISKV_CM_VERSION) {
         status = PRISKV_CM_REJ_STATUS_INVALID_VERSION;
@@ -372,7 +336,8 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
     }
 
     if (!peer_worker_address) {
-        priskv_log_error("UCX: <%s - %s> peer worker address is empty\n", local_addr, peer_addr);
+        priskv_log_error("UCX: <%s - %s> peer worker address is empty\n", client->local_addr,
+                         client->peer_addr);
         status = PRISKV_CM_REJ_STATUS_INVALID_WORKER_ADDR;
         value = 0;
         goto rej;
@@ -384,25 +349,18 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
         priskv_ucx_to_hex(worker_address_hex, peer_worker_address, print_len);
         priskv_log_debug(
             "UCX: got peer worker address from client %s, address_len %d, address (first %d) %s\n",
-            peer_addr, peer_worker_address_len, print_len, worker_address_hex);
+            client->peer_addr, peer_worker_address_len, print_len, worker_address_hex);
     }
 
-    status = priskv_ucx_verify_conn_cap(&client->conn_cap, &listener->conn_cap, &value);
+    status = priskv_ucx_verify_conn_cap(&client->conn_cap, &client->c.listener->conn_cap, &value);
     if (status) {
-        goto rej;
-    }
-
-    /* #step1, ACL verification */
-    if (priskv_acl_verify((struct sockaddr *)&client_addr)) {
-        priskv_log_error("UCX: <%s - %s> ACL verification failed\n", local_addr, peer_addr);
-        status = PRISKV_CM_REJ_STATUS_ACL_REFUSE;
-        value = 0;
         goto rej;
     }
 
     client->worker = priskv_ucx_worker_create(g_transport_server.context, 0);
     if (client->worker == NULL) {
-        priskv_log_error("UCX: <%s - %s> create worker failed\n", local_addr, peer_addr);
+        priskv_log_error("UCX: <%s - %s> create worker failed\n", client->local_addr,
+                         client->peer_addr);
         status = PRISKV_CM_REJ_STATUS_SERVER_ERROR;
         value = 0;
         goto rej;
@@ -411,7 +369,8 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
     client->ep = priskv_ucx_ep_create_from_worker_addr(client->worker, peer_worker_address,
                                                        priskv_ucx_conn_close_cb, client);
     if (client->ep == NULL) {
-        priskv_log_error("UCX: <%s - %s> create ep failed\n", local_addr, peer_addr);
+        priskv_log_error("UCX: <%s - %s> create ep failed\n", client->local_addr,
+                         client->peer_addr);
         status = PRISKV_CM_REJ_STATUS_SERVER_ERROR;
         goto rej;
     }
@@ -421,8 +380,8 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
 
     /* #step2, create related resources */
     if (priskv_ucx_new_ctrl_buffer(client)) {
-        priskv_log_error("UCX: <%s - %s> create ctrl buffer failed, name %s\n", local_addr,
-                         peer_addr, client->ep->name);
+        priskv_log_error("UCX: <%s - %s> create ctrl buffer failed, name %s\n", client->local_addr,
+                         client->peer_addr, client->ep->name);
         status = PRISKV_CM_REJ_STATUS_SERVER_ERROR;
         goto rej;
     }
@@ -450,39 +409,114 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
                           client->worker);
     client->c.thread = priskv_threadpool_find_iothread(g_threadpool);
     priskv_thread_add_event_handler(client->c.thread, client->worker->efd);
-    priskv_log_debug("UCX: <%s - %s> assign worker efd %d to thread %d\n", local_addr, peer_addr,
-                     client->worker->efd, client->c.thread);
+    priskv_log_debug("UCX: <%s - %s> assign worker efd %d to thread %d\n", client->local_addr,
+                     client->peer_addr, client->worker->efd, client->c.thread);
 
     if (priskv_set_nonblock(client->connfd)) {
-        priskv_log_error("UCX: <%s - %s> failed to set nonblock mode for connfd\n", local_addr,
-                         peer_addr);
+        priskv_log_error("UCX: <%s - %s> failed to set nonblock mode for connfd\n",
+                         client->local_addr, client->peer_addr);
         status = PRISKV_CM_REJ_STATUS_SERVER_ERROR;
         goto rej;
     }
 
     if (priskv_ucx_accept(client) < 0) {
-        priskv_log_error("UCX: <%s - %s> accept failed, name %s\n", local_addr, peer_addr,
-                         client->ep->name);
+        priskv_log_error("UCX: <%s - %s> accept failed, name %s\n", client->local_addr,
+                         client->peer_addr, client->ep->name);
         status = PRISKV_CM_REJ_STATUS_SERVER_ERROR;
         goto rej;
     }
 
     priskv_set_fd_handler(client->connfd, priskv_ucx_client_connfd_progress, NULL, client);
     priskv_thread_add_event_handler(client->c.thread, client->connfd);
-    priskv_log_debug("UCX: <%s - %s> assign connfd %d to thread %d\n", local_addr, peer_addr,
-                     client->connfd, client->c.thread);
+    priskv_log_debug("UCX: <%s - %s> assign connfd %d to thread %d\n", client->local_addr,
+                     client->peer_addr, client->connfd, client->c.thread);
 
-    priskv_log_notice("UCX: <%s - %s> established\n", local_addr, peer_addr);
+    priskv_log_notice("UCX: <%s - %s> established\n", client->local_addr, client->peer_addr);
 
     return;
 
 rej:
-    priskv_log_warn("UCX: <%s - %s> %s, reject\n", local_addr, peer_addr,
+    priskv_log_warn("UCX: <%s - %s> %s, reject\n", client->local_addr, client->peer_addr,
                     priskv_cm_status_str(status));
     if (peer_worker_address) {
         free(peer_worker_address);
         peer_worker_address = NULL;
     }
+    priskv_ucx_reject(client, status, value);
+    priskv_ucx_mark_client_closed(client);
+}
+
+static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
+{
+    priskv_log_debug("UCX: listener efd progress event %d, listener %p, efd %d\n", ev, opaque, fd);
+
+    priskv_transport_conn *listener = opaque;
+    int ret;
+    struct sockaddr_storage client_addr;
+    socklen_t client_addr_len;
+    int connfd;
+    char peer_addr[PRISKV_ADDR_LEN];
+    priskv_cm_status status;
+    uint64_t value = 0;
+
+    assert(listener->listenfd == fd);
+
+    client_addr_len = sizeof(client_addr);
+    connfd = accept(listener->listenfd, (struct sockaddr *)&client_addr, &client_addr_len);
+    if (connfd < 0) {
+        priskv_log_error("UCX: accept on listenfd %d failed: %m\n", listener->listenfd);
+        return;
+    }
+
+    priskv_inet_ntop(&client_addr, peer_addr);
+    priskv_log_info("UCX: accept on listenfd %d, connfd %d, client addr %s\n", listener->listenfd,
+                    connfd, peer_addr);
+
+    priskv_thread* thread = priskv_threadpool_find_iothread(g_transport_server.threadpool);
+    if (!thread) {
+        priskv_log_error("UCX: failed to find iothread\n");
+        ucs_close_fd(&connfd);
+        return;
+    }
+
+    priskv_transport_conn *client = calloc(1, sizeof(priskv_transport_conn));
+    assert(client);
+    client->ep = NULL;
+    client->inflight_reqs = NULL;
+    client->c.listener = listener;
+    client->c.thread = NULL;
+    client->c.closing = false;
+    client->connfd = connfd;
+    // copy conn_cap from listener, other fields are initialized with values
+    // exchanged by the remote peer
+    client->conn_cap.capacity = listener->conn_cap.capacity;
+    list_node_init(&client->c.node);
+    pthread_spin_init(&client->lock, 0);
+
+    const char *local_addr = listener->local_addr;
+    snprintf(client->local_addr, PRISKV_ADDR_LEN, "%s", local_addr);
+    snprintf(client->peer_addr, PRISKV_ADDR_LEN, "%s", peer_addr);
+
+    pthread_spin_lock(&listener->lock);
+    list_add_tail(&listener->s.head, &client->c.node);
+    listener->s.nclients++;
+    pthread_spin_unlock(&listener->lock);
+
+    /* #step1, ACL verification */
+    if (priskv_acl_verify((struct sockaddr *)&client_addr)) {
+        priskv_log_error("UCX: <%s - %s> ACL verification failed\n", client->local_addr,
+                         client->peer_addr);
+        status = PRISKV_CM_REJ_STATUS_ACL_REFUSE;
+        value = 0;
+        goto rej;
+    }
+
+    priskv_thread_submit_function(thread, priskv_ucx_handle_handshake, client);
+
+    return;
+rej:
+    priskv_log_warn("UCX: <%s - %s> %s, reject\n", client->local_addr, client->peer_addr,
+                    priskv_cm_status_str(status));
     priskv_ucx_reject(client, status, value);
     priskv_ucx_mark_client_closed(client);
 }
@@ -582,11 +616,6 @@ static int priskv_ucx_listen_one(char *addr, int port, void *kv, priskv_transpor
     listener->kv = kv;
     listener->conn_cap = *cap;
     listener->conn_cap.capacity = size;
-    listener->conn_cap_be.version = htobe16(PRISKV_CM_VERSION);
-    listener->conn_cap_be.max_sgl = htobe16(cap->max_sgl);
-    listener->conn_cap_be.max_key_length = htobe16(cap->max_key_length);
-    listener->conn_cap_be.max_inflight_command = htobe16(cap->max_inflight_command);
-    listener->conn_cap_be.capacity = htobe64(size);
     listener->s.nclients = 0;
     list_head_init(&listener->s.head);
     pthread_spin_init(&listener->lock, 0);
@@ -627,6 +656,13 @@ static int priskv_ucx_listen(char **addrs, int naddrs, int port, void *kv,
     }
 
     g_transport_server.kv = kv;
+    g_transport_server.threadpool =
+        priskv_threadpool_create("ucx_threadpool", g_config.server.ucx_threadpool_size, 0, 0);
+
+    if (!g_transport_server.threadpool) {
+        priskv_log_error("UCX: failed to create threadpool\n");
+        return -1;
+    }
 
     g_transport_server.epollfd = epoll_create(g_transport_server.nlisteners);
     if (g_transport_server.epollfd == -1) {

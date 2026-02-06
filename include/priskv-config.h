@@ -99,7 +99,7 @@ typedef struct priskv_client_config {
 } priskv_client_config_t;
 
 typedef struct priskv_server_config {
-
+    int ucx_threadpool_size;
 } priskv_server_config_t;
 
 typedef struct priskv_logging_config {

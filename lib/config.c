@@ -38,6 +38,10 @@ static ucs_config_field_t priskv_client_config_table[] = {
 };
 
 static ucs_config_field_t priskv_server_config_table[] = {
+    {"UCX_THREADPOOL_SIZE", "8", "Size of threadpool for UCX.",
+     ucs_offsetof(priskv_server_config_t, ucx_threadpool_size),
+     UCS_CONFIG_TYPE_INT},
+
     {NULL}
 };
 

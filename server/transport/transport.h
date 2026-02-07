@@ -109,7 +109,6 @@ typedef struct priskv_transport_conn {
                 struct {
                     int listenfd;
                     int efd;
-                    priskv_transport_conn_cap conn_cap_be;
                 }; // listener
                 struct {
                     int connfd;
@@ -169,6 +168,7 @@ typedef struct priskv_transport_server {
         struct {}; // rdma
         struct {
             priskv_ucx_context *context;
+            priskv_threadpool *threadpool;
         }; // ucx
     };
 } priskv_transport_server;

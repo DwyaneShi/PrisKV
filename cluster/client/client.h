@@ -153,6 +153,10 @@ static inline const char *priskv_cluster_status_str(priskvClusterStatus status)
 
 typedef void (*priskvClusterCallback)(priskvClusterStatus status, uint32_t valuelen, void *cbarg);
 
+/* 零拷贝回调：返回地址/长度以及 token（用于后续 SEAL/RELEASE/DROP） */
+typedef void (*priskvClusterZeroCopyCallback)(priskvClusterStatus status, uint64_t addr_offset,
+                                              uint32_t valuelen, uint64_t token, void *cbarg);
+
 /* async APIs */
 int priskvClusterAsyncGet(priskvClusterClient *client, const char *key, priskvClusterSGL *sgl,
                         uint16_t nsgl, priskvClusterCallback cb, void *cbarg);
@@ -162,14 +166,40 @@ int priskvClusterAsyncTest(priskvClusterClient *client, const char *key, priskvC
                          void *cbarg);
 int priskvClusterAsyncDelete(priskvClusterClient *client, const char *key, priskvClusterCallback cb,
                            void *cbarg);
-
+int priskvClusterAsyncAlloc(priskvClusterClient *client, const char *key, uint64_t alloc_length,
+                            uint64_t timeout, priskvClusterZeroCopyCallback cb, void *cbarg);
+int priskvClusterAsyncSeal(priskvClusterClient *client, const char *key, const uint64_t *token,
+                           priskvClusterCallback cb, void *cbarg);
+int priskvClusterAsyncAcquire(priskvClusterClient *client, const char *key, uint64_t timeout,
+                              priskvClusterZeroCopyCallback cb, void *cbarg);
+int priskvClusterAsyncRelease(priskvClusterClient *client, const char *key, const uint64_t *token,
+                              priskvClusterCallback cb, void *cbarg);
+int priskvClusterAsyncDrop(priskvClusterClient *client, const char *key, const uint64_t *token,
+                           priskvClusterCallback cb, void *cbarg);
 /* sync APIs */
 priskvClusterStatus priskvClusterGet(priskvClusterClient *client, const char *key, priskvClusterSGL *sgl,
                                  uint16_t nsgl, uint32_t *value_len);
 priskvClusterStatus priskvClusterSet(priskvClusterClient *client, const char *key, priskvClusterSGL *sgl,
                                  uint16_t nsgl, uint64_t timeout);
+priskvClusterStatus priskvClusterAlloc(priskvClusterClient *client, const char *key,
+                                       uint64_t alloc_length, uint64_t timeout, uint64_t *addr);
+priskvClusterStatus priskvClusterSeal(priskvClusterClient *client, const char *key,
+                                      const uint64_t *token);
+priskvClusterStatus priskvClusterAcquire(priskvClusterClient *client, const char *key,
+                                         uint64_t timeout, uint64_t *addr_offset,
+                                         uint32_t *valuelen);
+priskvClusterStatus priskvClusterRelease(priskvClusterClient *client, const char *key,
+                                         const uint64_t *token);
+priskvClusterStatus priskvClusterDrop(priskvClusterClient *client, const char *key,
+                                      const uint64_t *token);
 priskvClusterStatus priskvClusterTest(priskvClusterClient *client, const char *key, uint32_t *value_len);
 priskvClusterStatus priskvClusterDelete(priskvClusterClient *client, const char *key);
 priskvClusterStatus priskvClusterKeys(priskvClusterClient *client, const char *regex,
                                   priskv_keyset **keyset);
 priskvClusterStatus priskvClusterStatusFromPRISKVStatus(priskv_status status);
+
+/* 新增：zerocopy 使用 memory_region 的同步接口 */
+int priskvClusterAllocRegion(priskvClusterClient *client, const char *key, uint32_t alloc_length,
+                             uint64_t timeout, priskv_memory_region *region);
+int priskvClusterAcquireRegion(priskvClusterClient *client, const char *key, uint64_t timeout,
+                               priskv_memory_region *region);

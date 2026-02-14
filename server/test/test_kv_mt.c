@@ -38,6 +38,7 @@
 #include "priskv-protocol.h"
 #include "priskv-protocol-helper.h"
 #include "priskv-utils.h"
+#include "../transport/transport.h"
 
 #define NUM_THREADS 4
 #define MAX_KEYS_PER_THREAD (64 * 1024)
@@ -54,6 +55,12 @@ typedef struct test_kv {
     uint8_t *value;
     uint8_t *value_in_kv;
     uint32_t valuelen_in_kv;
+
+    /* for acquire/release (snapshot isolation) test */
+    void *acquired_keynode;
+    uint8_t *acquired_value;
+    uint32_t acquired_valuelen;
+    uint8_t *old_value_copy;
 } test_kv;
 
 typedef struct test_kv_thread_arg {
@@ -65,11 +72,38 @@ typedef void *(*test_kv_func)(void *arg);
 static test_kv *test_kvs;
 static void *kv;
 
+/* --- Internal Helpers for Test Case Simplification --- */
+
+static void __test_kv_save_old_value(test_kv *tkv, uint8_t *current_val, uint32_t len)
+{
+    if (tkv->old_value_copy) {
+        free(tkv->old_value_copy);
+    }
+    tkv->acquired_value = current_val;
+    tkv->acquired_valuelen = len;
+    tkv->old_value_copy = malloc(len);
+    memcpy(tkv->old_value_copy, tkv->value, len);
+}
+
+static void __test_kv_release_token(test_kv *tkv)
+{
+    if (tkv->acquired_keynode) {
+        priskv_get_key_end(tkv->acquired_keynode);
+        tkv->acquired_keynode = NULL;
+    }
+    if (tkv->old_value_copy) {
+        free(tkv->old_value_copy);
+        tkv->old_value_copy = NULL;
+    }
+    tkv->acquired_value = NULL;
+}
+
+/* --- Thread Functions --- */
+
 static void *test_kv_gen(void *arg)
 {
     uint32_t thdid = *(int *)arg;
 
-    // printf("GEN KV: thread %d\n", thdid);
     for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
         test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
         tkv->keylen = priskv_rdtsc() % (MAX_KEY_LENGTH / 2) + MAX_KEY_LENGTH / 2;
@@ -89,11 +123,10 @@ static void *test_kv_get_empty(void *arg)
     uint32_t thdid = *(int *)arg;
     void *keynode;
 
-    // printf("GEN KV: thread %d\n", thdid);
     for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
         test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
-        int ret = priskv_get_key(kv, tkv->key, tkv->keylen, &tkv->value_in_kv, &tkv->valuelen_in_kv,
-                               &keynode);
+        int ret = priskv_get_key(kv, tkv->key, tkv->keylen, &tkv->value_in_kv,
+                                 &tkv->valuelen_in_kv, &keynode);
         if (ret != PRISKV_RESP_STATUS_NO_SUCH_KEY || keynode != NULL) {
             printf("TEST KV: get keys from empty KV [FAILED]\n");
             assert(0);
@@ -112,8 +145,8 @@ static void *test_kv_set(void *arg)
 
     for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
         test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
-        int ret = priskv_set_key(kv, tkv->key, tkv->keylen, &tkv->value_in_kv, tkv->valuelen, timeout,
-                               &keynode);
+        int ret = priskv_set_key(kv, tkv->key, tkv->keylen, &tkv->value_in_kv, tkv->valuelen,
+                                 timeout, &keynode);
         if (ret != PRISKV_RESP_STATUS_OK || !keynode) {
             printf("TEST KV: set keys to empty KV [FAILED]\n");
             assert(0);
@@ -147,7 +180,6 @@ static void *test_kv_delete(void *arg)
 {
     uint32_t thdid = *(int *)arg;
 
-    // printf("DELETE KV: thread %d\n", thdid);
     for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
         test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
         int ret = priskv_delete_key(kv, tkv->key, tkv->keylen);
@@ -165,14 +197,14 @@ static void *test_kv_verify(void *arg)
     uint32_t thdid = *(int *)arg;
     void *keynode;
 
-    // printf("VERIFY KV: thread %d\n", thdid);
     for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
         test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
         uint8_t *value_in_kv;
-        int ret =
-            priskv_get_key(kv, tkv->key, tkv->keylen, &value_in_kv, &tkv->valuelen_in_kv, &keynode);
+        int ret = priskv_get_key(kv, tkv->key, tkv->keylen, &value_in_kv,
+                                 &tkv->valuelen_in_kv, &keynode);
         if (ret != PRISKV_RESP_STATUS_OK || !keynode) {
-            printf("TEST KV: verify KV [%d] status [%s] [FAILED]\n", i, priskv_resp_status_str(ret));
+            printf("TEST KV: verify KV [%d] status [%s] [FAILED]\n", i,
+                   priskv_resp_status_str(ret));
             assert(0);
         }
 
@@ -190,8 +222,6 @@ static void *test_kv_verify(void *arg)
 
         if (memcmp(value_in_kv, tkv->value, tkv->valuelen)) {
             printf("TEST KV: verify KV [%d] value compare [FAILED]\n", i);
-            printf("\t%s\n", value_in_kv);
-            printf("\t%s\n", tkv->value);
             assert(0);
         }
 
@@ -199,6 +229,141 @@ static void *test_kv_verify(void *arg)
     }
 
     return NULL;
+}
+
+static void *test_kv_alloc_publish(void *arg)
+{
+    test_kv_thread_arg *args = (test_kv_thread_arg *)arg;
+    uint32_t thdid = args->thdid;
+    uint64_t timeout = args->timeout;
+    void *keynode;
+
+    for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
+        test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
+        uint8_t *val_ptr;
+        int ret = priskv_alloc_node_private(kv, tkv->key, tkv->keylen, &val_ptr, tkv->valuelen,
+                                            timeout, &keynode);
+        if (ret != PRISKV_RESP_STATUS_OK || !keynode) {
+            printf("TEST KV: alloc node private [FAILED] ret %d\n", ret);
+            assert(0);
+        }
+        tkv->value_in_kv = val_ptr;
+        memcpy(tkv->value_in_kv, tkv->value, tkv->valuelen);
+
+        ret = priskv_publish_node(kv, keynode);
+        if (ret != PRISKV_RESP_STATUS_OK) {
+            printf("TEST KV: publish node [FAILED] ret %d\n", ret);
+            assert(0);
+        }
+    }
+
+return NULL;
+}
+
+static void *test_kv_acquire_all(void *arg)
+{
+    uint32_t thdid = *(int *)arg;
+
+    for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
+        test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
+        uint8_t *val_ptr;
+        uint32_t val_len;
+        int ret = priskv_get_key(kv, tkv->key, tkv->keylen, &val_ptr, &val_len,
+                                 &tkv->acquired_keynode);
+        if (ret != PRISKV_RESP_STATUS_OK || !tkv->acquired_keynode) {
+            printf("TEST KV: acquire (get_key) [FAILED] ret %d\n", ret);
+            assert(0);
+        }
+        __test_kv_save_old_value(tkv, val_ptr, val_len);
+    }
+
+return NULL;
+}
+
+static void *test_kv_verify_acquired(void *arg)
+{
+    uint32_t thdid = *(int *)arg;
+
+    for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
+        test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
+        if (memcmp(tkv->acquired_value, tkv->old_value_copy, tkv->acquired_valuelen)) {
+            printf("TEST KV: verify acquired snapshot [FAILED]\n");
+            assert(0);
+        }
+    }
+
+return NULL;
+}
+
+static void *test_kv_release_all(void *arg)
+{
+    uint32_t thdid = *(int *)arg;
+
+    for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
+        test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
+        __test_kv_release_token(tkv);
+    }
+
+return NULL;
+}
+
+static void *test_kv_update_data(void *arg)
+{
+    uint32_t thdid = *(int *)arg;
+
+    for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
+        test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
+        /* regenerate value with new random data */
+        priskv_random_string(tkv->value, tkv->valuelen);
+    }
+
+return NULL;
+}
+
+static void *test_kv_alloc_only(void *arg)
+{
+    test_kv_thread_arg *args = (test_kv_thread_arg *)arg;
+    uint32_t thdid = args->thdid;
+    uint64_t timeout = args->timeout;
+
+    for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
+        test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
+        uint8_t *val_ptr;
+        int ret = priskv_alloc_node_private(kv, tkv->key, tkv->keylen, &val_ptr, tkv->valuelen,
+                                            timeout, &tkv->acquired_keynode);
+        if (ret != PRISKV_RESP_STATUS_OK || !tkv->acquired_keynode) {
+            printf("TEST KV: alloc only [FAILED] ret %d\n", ret);
+            assert(0);
+        }
+        tkv->value_in_kv = val_ptr;
+        memcpy(tkv->value_in_kv, tkv->value, tkv->valuelen);
+
+        __test_kv_save_old_value(tkv, val_ptr, tkv->valuelen);
+    }
+
+return NULL;
+}
+
+static void *test_kv_drop_all(void *arg)
+{
+    uint32_t thdid = *(int *)arg;
+
+    for (uint32_t i = 0; i < MAX_KEYS_PER_THREAD; i++) {
+        test_kv *tkv = &test_kvs[i + MAX_KEYS_PER_THREAD * thdid];
+        /* 1. Remove from hash table */
+        priskv_drop_node(kv, tkv->acquired_keynode);
+
+        /* 2. VERIFY: The memory should STILL be valid here */
+        if (memcmp(tkv->acquired_value, tkv->old_value_copy, tkv->acquired_valuelen)) {
+            printf("TEST KV: verify memory AFTER drop node but BEFORE release [FAILED]\n");
+            assert(0);
+        }
+
+        /* 3. Release reference */
+        __test_kv_release_token(tkv);
+    }
+
+return NULL;
 }
 
 static void test_kv_free()
@@ -209,6 +374,8 @@ static void test_kv_free()
         tkv = &test_kvs[i];
         free(tkv->key);
         free(tkv->value);
+        if (tkv->old_value_copy)
+            free(tkv->old_value_copy);
     }
 
     free(test_kvs);
@@ -220,7 +387,7 @@ static int do_test_mt_kv(test_kv_func func, pthread_t *threads, int *thdid, uint
     struct test_kv_thread_arg thread_args[NUM_THREADS];
 
     for (uint32_t i = 0; i < NUM_THREADS; i++) {
-        if (func == test_kv_set || func == test_kv_expire) {
+        if (func == test_kv_set || func == test_kv_expire || func == test_kv_alloc_publish) {
             thread_args[i] = (test_kv_thread_arg) {.thdid = thdid[i], .timeout = timeout};
             arg = (void *)&thread_args[i];
         } else {
@@ -253,10 +420,12 @@ int main()
     test_kvs = calloc(MAX_KEYS, sizeof(test_kv));
     assert(test_kvs);
 
-    key_base = calloc(MAX_KEYS, priskv_mem_key_size(MAX_KEY_LENGTH));
-    value_base = calloc(1, priskv_buddy_mem_size(VALUE_BLOCKS, VALUE_BLOCK_SIZE));
-    kv = priskv_new_kv(key_base, value_base, -1, 0, MAX_KEYS, MAX_KEY_LENGTH, VALUE_BLOCK_SIZE,
-                       VALUE_BLOCKS);
+    /* Double the capacity to support snapshot isolation test (hold old version while writing new
+     * version) */
+    key_base = calloc(MAX_KEYS * 2, priskv_mem_key_size(MAX_KEY_LENGTH));
+    value_base = calloc(1, priskv_buddy_mem_size(VALUE_BLOCKS * 2, VALUE_BLOCK_SIZE));
+    kv = priskv_new_kv(key_base, value_base, -1, 0, MAX_KEYS * 2, MAX_KEY_LENGTH, VALUE_BLOCK_SIZE,
+                       VALUE_BLOCKS * 2, NULL /* mf_ctx */);
     assert(kv);
 
     for (uint32_t i = 0; i < NUM_THREADS; i++) {
@@ -265,15 +434,17 @@ int main()
 
     ret = do_test_mt_kv(test_kv_gen, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: generate keys[OK]\n");
 
+    /* --- SECTION 1: Basic KV Operations (SET/GET/DELETE) --- */
+
     /* step 1, get keys from empty KV */
     ret = do_test_mt_kv(test_kv_get_empty, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: get keys from empty KV [OK]\n");
@@ -281,7 +452,7 @@ int main()
     /* step 2, set keys to empty KV */
     ret = do_test_mt_kv(test_kv_set, threads, thdid, PRISKV_KEY_MAX_TIMEOUT);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: set keys to empty KV [OK]\n");
@@ -289,7 +460,7 @@ int main()
     /* step 3, get keys from KV and compare values */
     ret = do_test_mt_kv(test_kv_verify, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: verify keys from filled KV [OK]\n");
@@ -297,7 +468,7 @@ int main()
     /* step 4, delete keys from KV */
     ret = do_test_mt_kv(test_kv_delete, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: delete keys from filled KV [OK]\n");
@@ -305,15 +476,17 @@ int main()
     /* step 5, get keys from empty KV */
     ret = do_test_mt_kv(test_kv_get_empty, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: get keys from empty KV [OK]\n");
 
+    /* --- SECTION 2: Expiration Logic (TTL/EXPIRE) --- */
+
     /* step 6, set keys to empty KV with timeout 5s */
     ret = do_test_mt_kv(test_kv_set, threads, thdid, 5 * 1000);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: set keys to empty KV with timeout 5s [OK]\n");
@@ -322,7 +495,7 @@ int main()
     sleep(3);
     ret = do_test_mt_kv(test_kv_verify, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: verify keys from filled KV before expired [OK]\n");
@@ -331,7 +504,7 @@ int main()
     sleep(6);
     ret = do_test_mt_kv(test_kv_get_empty, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: get keys after expired [OK]\n");
@@ -339,7 +512,7 @@ int main()
     /* step 9, set keys to empty KV without timeout */
     ret = do_test_mt_kv(test_kv_set, threads, thdid, PRISKV_KEY_MAX_TIMEOUT);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: set keys to empty KV [OK]\n");
@@ -348,7 +521,7 @@ int main()
     sleep(5);
     ret = do_test_mt_kv(test_kv_verify, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: verify keys from filled KV after a while with no expire time [OK]\n");
@@ -356,7 +529,7 @@ int main()
     /* step 11, set expire time 5s */
     ret = do_test_mt_kv(test_kv_expire, threads, thdid, 5 * 1000);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: set expire time 5s [OK]\n");
@@ -365,15 +538,114 @@ int main()
     sleep(6);
     ret = do_test_mt_kv(test_kv_get_empty, threads, thdid, 0);
     if (ret) {
-        return 1;
+        goto out;
     }
 
     printf("TEST KV: get keys from empty KV [OK]\n");
 
-    priskv_destroy_kv(kv);
-    free(key_base);
-    free(value_base);
-    test_kv_free(test_kvs, MAX_KEYS);
+    /* --- SECTION 3: Zero-Copy Write (ALLOC/PUBLISH) --- */
 
-    return 0;
+    /* step 13, set keys to empty KV via alloc and publish */
+    ret = do_test_mt_kv(test_kv_alloc_publish, threads, thdid, PRISKV_KEY_MAX_TIMEOUT);
+    if (ret) {
+        goto out;
+    }
+
+    printf("TEST KV: set keys to empty KV via alloc and publish [OK]\n");
+
+    /* step 14, get keys from KV and compare values */
+    ret = do_test_mt_kv(test_kv_verify, threads, thdid, 0);
+    if (ret) {
+        goto out;
+    }
+
+    printf("TEST KV: verify keys from filled KV after alloc and publish [OK]\n");
+
+    /* --- SECTION 4: Snapshot Isolation (ACQUIRE/UPDATE/RELEASE) --- */
+
+    /* step 15, acquire all keys for snapshot isolation test */
+    ret = do_test_mt_kv(test_kv_acquire_all, threads, thdid, 0);
+    if (ret) {
+        goto out;
+    }
+    printf("TEST KV: acquire all keys (Snapshot Start) [OK]\n");
+
+    /* step 16, update all keys to new version while readers hold old version */
+    ret = do_test_mt_kv(test_kv_update_data, threads, thdid, 0);
+    if (ret)
+        goto out;
+    ret = do_test_mt_kv(test_kv_alloc_publish, threads, thdid, PRISKV_KEY_MAX_TIMEOUT);
+    if (ret)
+        goto out;
+    printf("TEST KV: update all keys to new version [OK]\n");
+
+    /* step 17, verify readers still see old data */
+    ret = do_test_mt_kv(test_kv_verify_acquired, threads, thdid, 0);
+    if (ret) {
+        goto out;
+    }
+    printf("TEST KV: verify readers see old snapshot [OK]\n");
+
+    /* step 18, release old version */
+    ret = do_test_mt_kv(test_kv_release_all, threads, thdid, 0);
+    if (ret) {
+        goto out;
+    }
+    printf("TEST KV: release all keys (Snapshot End) [OK]\n");
+
+    /* step 19, verify new version is now the latest */
+    ret = do_test_mt_kv(test_kv_verify, threads, thdid, 0);
+    if (ret) {
+        goto out;
+    }
+    printf("TEST KV: verify new version is latest [OK]\n");
+
+    /* --- SECTION 5: Token DROP Semantics (DROP) --- */
+
+    /* step 20, test DROP: acquire and then drop (should remove from hash table) */
+    ret = do_test_mt_kv(test_kv_acquire_all, threads, thdid, 0);
+    if (ret)
+        goto out;
+    printf("TEST KV: acquire all keys (before DROP) [OK]\n");
+
+    ret = do_test_mt_kv(test_kv_drop_all, threads, thdid, 0);
+    if (ret)
+        goto out;
+    printf("TEST KV: drop all keys (using token/keynode) [OK]\n");
+
+    ret = do_test_mt_kv(test_kv_get_empty, threads, thdid, 0);
+    if (ret) {
+        printf("TEST KV: verify empty after DROP [FAILED]\n");
+        goto out;
+    }
+    printf("TEST KV: verify empty after DROP [OK]\n");
+
+    /* step 21, test DROP after ALLOC (without SEAL) */
+    ret = do_test_mt_kv(test_kv_alloc_only, threads, thdid, PRISKV_KEY_MAX_TIMEOUT);
+    if (ret)
+        goto out;
+    printf("TEST KV: alloc all keys (without SEAL) [OK]\n");
+
+    ret = do_test_mt_kv(test_kv_drop_all, threads, thdid, 0);
+    if (ret)
+        goto out;
+    printf("TEST KV: drop all allocated keys [OK]\n");
+
+    ret = do_test_mt_kv(test_kv_get_empty, threads, thdid, 0);
+    if (ret) {
+        printf("TEST KV: verify empty after DROP (ALLOC) [FAILED]\n");
+        goto out;
+    }
+    printf("TEST KV: verify empty after DROP (ALLOC) [OK]\n");
+
+out:
+    if (kv)
+        priskv_destroy_kv(kv);
+    if (key_base)
+        free(key_base);
+    if (value_base)
+        free(value_base);
+    test_kv_free();
+
+    return ret;
 }

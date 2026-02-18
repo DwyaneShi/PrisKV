@@ -113,7 +113,7 @@ static int priskv_transport_mmap(void **addr, uint64_t *size, int *fd, uint32_t 
     }
 
     *size = statbuf.st_size;
-    *addr = mmap(NULL, *size, PROT_READ | PROT_WRITE, MAP_SHARED, *fd, 0);
+    *addr = mmap(NULL, *size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, *fd, 0);
     if (*addr == MAP_FAILED) {
         priskv_log_error("Transport: failed to mmap shm buffer %m\n");
         goto err;

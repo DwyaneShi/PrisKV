@@ -230,11 +230,9 @@ void priskv_close(priskv_client *client)
     close(client->epollfd);
     client->epollfd = -1;
     if (client->shm_addr) {
-#ifdef PRISKV_USE_CUDA
         if (g_config.mem.use_cuda) {
-            cudaHostUnregister(client->shm_addr);
+            priskv_cuda_host_unregister(client->shm_addr);
         }
-#endif
         munmap(client->shm_addr, client->shm_len);
         close(client->shm_fd);
         client->shm_addr = NULL;

@@ -38,8 +38,25 @@ static inline int priskv_cuda_host_register(void *addr, size_t size)
     }
     return 0;
 }
+
+static inline int priskv_cuda_host_unregister(void *addr)
+{
+    cudaError_t ret = cudaHostUnregister(addr);
+    if (ret != cudaSuccess) {
+        priskv_log_error("Cuda: failed to unregister host memory %p, %s\n", addr,
+                         cudaGetErrorString(ret));
+        return -1;
+    }
+    return 0;
+}
 #else
 static inline int priskv_cuda_host_register(void *addr, size_t size)
+{
+    priskv_log_error("Cuda: PrisKV is not compiled with CUDA support\n");
+    return -1;
+}
+
+static inline int priskv_cuda_host_unregister(void *addr)
 {
     priskv_log_error("Cuda: PrisKV is not compiled with CUDA support\n");
     return -1;

@@ -448,10 +448,6 @@ void *priskv_mem_anon(uint16_t max_key_length, uint32_t max_keys, uint32_t value
     priskv_mem_clear(memfile->key_addr, key_size, threads);
     priskv_mem_clear(memfile->value_addr, value_size, threads);
 
-    if (g_config.mem.use_cuda) {
-        assert(!priskv_cuda_host_register(memfile->value_addr, value_size));
-    }
-
     g_memory_info.type = "anonymous";
 
     return memfile;
@@ -547,10 +543,6 @@ void *priskv_mem_load(const char *path)
     memfile->memfile_addr = addr;
     memfile->length = statbuf.st_size;
 
-    if (g_config.mem.use_cuda) {
-        assert(!priskv_cuda_host_register(memfile->memfile_addr, memfile->length));
-    }
-
     g_memory_info.type = "memfile";
     g_memory_info.path = path;
     g_memory_info.filesize = statbuf.st_size;
@@ -574,19 +566,9 @@ void priskv_mem_close(void *ctx)
     priskv_mem_file *memfile = ctx;
 
     if (memfile->fd != PRISKV_MEM_INVALID_FD) {
-#ifdef PRISKV_USE_CUDA
-        if (g_config.mem.use_cuda) {
-            cudaHostUnregister(memfile->memfile_addr);
-        }
-#endif
         close(memfile->fd);
         munmap(memfile->memfile_addr, memfile->length);
     } else {
-#ifdef PRISKV_USE_CUDA
-        if (g_config.mem.use_cuda) {
-            cudaHostUnregister(memfile->value_addr);
-        }
-#endif
         priskv_mem_free(memfile->key_addr, memfile->key_length, true);
         priskv_mem_free(memfile->value_addr, memfile->value_length, true);
         if (memfile->value_fd != PRISKV_MEM_INVALID_FD) {

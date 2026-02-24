@@ -45,6 +45,18 @@ static ucs_config_field_t priskv_server_config_table[] = {
     {NULL}
 };
 
+static ucs_config_field_t priskv_mem_config_table[] = {
+    {"USE_SHM", "0", "Use shared memory for zero-copy.",
+     ucs_offsetof(priskv_mem_config_t, use_shm),
+     UCS_CONFIG_TYPE_BOOL},
+
+    {"USE_CUDA", "0", "Use CUDA memory registration.",
+     ucs_offsetof(priskv_mem_config_t, use_cuda),
+     UCS_CONFIG_TYPE_BOOL},
+
+    {NULL}
+};
+
 static ucs_config_field_t priskv_logging_config_table[] = {
     {"LOG_LEVEL", "notice", "PrisKV log level.", ucs_offsetof(priskv_logging_config_t, log_level),
      UCS_CONFIG_TYPE_ENUM(priskv_log_level_str)},
@@ -78,6 +90,9 @@ static ucs_config_field_t priskv_config_table[] = {
     {"", "", NULL, ucs_offsetof(priskv_config_t, logging),
      UCS_CONFIG_TYPE_TABLE(priskv_logging_config_table)},
 
+    {"", "", NULL, ucs_offsetof(priskv_config_t, mem),
+     UCS_CONFIG_TYPE_TABLE(priskv_mem_config_table)},
+
     {NULL}
 };
 
@@ -93,6 +108,20 @@ static void priskv_config_init_impl(void)
     if (status != UCS_OK) {
         priskv_log_error("Failed to initialize config: %s\n", ucs_status_string(status));
     } else {
+#ifndef PRISKV_USE_CUDA
+        if (g_config.mem.use_cuda) {
+            priskv_log_error(
+                "CUDA memory registration is enabled, but PrisKV is compiled without CUDA support. "
+                "Please recompile PrisKV with CUDA support.");
+            exit(-1);
+        }
+#endif
+        if (g_config.mem.use_cuda && !g_config.mem.use_shm) {
+            g_config.mem.use_shm = true;
+            priskv_log_warn("CUDA memory registration is enabled, but shared memory is disabled. "
+                            "Shared memory will be enabled automatically.");
+        }
+
         ucs_config_parser_print_opts(
             stdout, "PrisKV Environment Variables", &g_config, priskv_config_table, NULL,
             PRISKV_ENV_PREFIX,

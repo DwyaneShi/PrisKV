@@ -1140,7 +1140,7 @@ static void priskv_cluster_drv_handler(int fd, void *opaque, uint32_t events)
 
 static const char *priskv_cluster_drv_status_str(int status)
 {
-    return priskv_cluster_status_str(priskvClusterStatusFromPRISKVStatus(status));
+    return priskv_cluster_status_str(priskvClusterStatusFromPriskvStatus(status));
 }
 
 typedef struct {

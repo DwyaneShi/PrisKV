@@ -172,4 +172,4 @@ priskvClusterStatus priskvClusterTest(priskvClusterClient *client, const char *k
 priskvClusterStatus priskvClusterDelete(priskvClusterClient *client, const char *key);
 priskvClusterStatus priskvClusterKeys(priskvClusterClient *client, const char *regex,
                                   priskv_keyset **keyset);
-priskvClusterStatus priskvClusterStatusFromPRISKVStatus(priskv_status status);
+priskvClusterStatus priskvClusterStatusFromPriskvStatus(priskv_status status);

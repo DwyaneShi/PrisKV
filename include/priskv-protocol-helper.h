@@ -119,56 +119,16 @@ static inline const char *priskv_command_str(priskv_req_command cmd)
 static inline const char *priskv_resp_status_str(priskv_resp_status status)
 {
     switch (status) {
-    case PRISKV_RESP_STATUS_OK:
-        return "OK";
-
-    case PRISKV_RESP_STATUS_INVALID_COMMAND:
-        return "Invalid command";
-
-    case PRISKV_RESP_STATUS_KEY_EMPTY:
-        return "Empty key";
-
-    case PRISKV_RESP_STATUS_KEY_TOO_BIG:
-        return "Key too big";
-
-    case PRISKV_RESP_STATUS_VALUE_EMPTY:
-        return "Empty Value";
-
-    case PRISKV_RESP_STATUS_VALUE_TOO_BIG:
-        return "Value too big";
-
-    case PRISKV_RESP_STATUS_NO_SUCH_COMMAND:
-        return "No such command";
-
-    case PRISKV_RESP_STATUS_NO_SUCH_KEY:
-        return "No such key";
-
-    case PRISKV_RESP_STATUS_NO_SUCH_TOKEN:
-        return "No such token";
-
-    case PRISKV_RESP_STATUS_UNPIN_NOT_CLOSED:
-        return "Unpin operation not closed";
-
-    case PRISKV_RESP_STATUS_INVALID_SGL:
-        return "Invalid SGL";
-
-    case PRISKV_RESP_STATUS_INVALID_REGEX:
-        return "Invalid regex";
-
-    case PRISKV_RESP_STATUS_KEY_UPDATING:
-        return "Key is updating";
-
-    case PRISKV_RESP_STATUS_CONNECT_ERROR:
-        return "Connect error";
-
-    case PRISKV_RESP_STATUS_SERVER_ERROR:
-        return "Server internal error";
-
-    case PRISKV_RESP_STATUS_PERMISSION_DENIED:
-        return "Permission denied";
-
-    case PRISKV_RESP_STATUS_NO_MEM:
-        return "No memory";
+#undef PRISKV_DECLARE_STATUS
+#undef PRISKV_DECLARE_RESP_STATUS_0
+#undef PRISKV_DECLARE_RESP_STATUS_1
+#define PRISKV_DECLARE_STATUS(NAME, CODE, STR, IS_RESP_STATUS) PRISKV_DECLARE_RESP_STATUS_##IS_RESP_STATUS(CODE, STR)
+#define PRISKV_DECLARE_RESP_STATUS_1(CODE, STR) case CODE: return STR;
+#define PRISKV_DECLARE_RESP_STATUS_0(CODE, STR)
+#include "priskv-status.inc"
+#undef PRISKV_DECLARE_RESP_STATUS_0
+#undef PRISKV_DECLARE_RESP_STATUS_1
+#undef PRISKV_DECLARE_STATUS
     }
 
     return "Unknown";

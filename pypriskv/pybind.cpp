@@ -270,14 +270,20 @@ PYBIND11_MODULE(_priskv_client, m)
 {
     m.attr("PRISKV_KEY_MAX_TIMEOUT") = PRISKV_KEY_MAX_TIMEOUT;
 
-    // Export only the PRISKV_STATUS enum (do not export top-level constants) to keep type-safe access.
+    // Export the priskvClusterStatus enum
     // Usage: priskv.PRISKV_STATUS.PRISKV_STATUS_OK, etc.
-    py::enum_<priskv_status>(m, "PRISKV_STATUS")
-        .value("PRISKV_STATUS_OK", PRISKV_STATUS_OK)
-        .value("PRISKV_STATUS_NO_SUCH_KEY", PRISKV_STATUS_NO_SUCH_KEY)
-        .value("PRISKV_STATUS_PERMISSION_DENIED", PRISKV_STATUS_PERMISSION_DENIED)
-        .value("PRISKV_STATUS_NO_SUCH_TOKEN", PRISKV_STATUS_NO_SUCH_TOKEN)
-        .value("PRISKV_STATUS_UNPIN_NOT_CLOSED", PRISKV_STATUS_UNPIN_NOT_CLOSED);
+    py::enum_<priskvClusterStatus>(m, "PRISKV_STATUS")
+#undef PRISKV_DECLARE_STATUS
+#undef PRISKV_DECLARE_RESP_STATUS_0
+#undef PRISKV_DECLARE_RESP_STATUS_1
+#define PRISKV_DECLARE_STATUS(NAME, CODE, STR, IS_RESP_STATUS) PRISKV_DECLARE_RESP_STATUS_##IS_RESP_STATUS(NAME, CODE)
+#define PRISKV_DECLARE_RESP_STATUS_1(NAME, CODE) .value("PRISKV_STATUS_" #NAME, PRISKV_CLUSTER_STATUS_##NAME)
+#define PRISKV_DECLARE_RESP_STATUS_0(NAME, CODE)
+#include "priskv-cluster-status.inc"
+#undef PRISKV_DECLARE_RESP_STATUS_0
+#undef PRISKV_DECLARE_RESP_STATUS_1
+#undef PRISKV_DECLARE_STATUS
+    ;
 
     pybind11::class_<priskv_memory_region>(m, "MemoryRegion", py::module_local())
         .def(pybind11::init<>())

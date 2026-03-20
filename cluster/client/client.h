@@ -47,127 +47,21 @@ typedef struct priskvClusterSGL {
 } priskvClusterSGL;
 
 typedef enum priskvClusterStatus {
-    PRISKV_CLUSTER_STATUS_OK = 0x00,
-    /* unrecognized command, typically protocol error */
-    PRISKV_CLUSTER_STATUS_INVALID_COMMAND = 0x100,
-
-    /* zero length key in use? Note that '\0' is allowed */
-    PRISKV_CLUSTER_STATUS_KEY_EMPTY,
-
-    /* does the length of key exceed @max_key_length? */
-    PRISKV_CLUSTER_STATUS_KEY_TOO_BIG,
-
-    /* zero length value in use? Note that '\0' is allowed */
-    PRISKV_CLUSTER_STATUS_VALUE_EMPTY,
-
-    /* the length of @priskv_sgl is smaller than the length of value */
-    PRISKV_CLUSTER_STATUS_VALUE_TOO_BIG,
-
-    /* no such command */
-    PRISKV_CLUSTER_STATUS_NO_SUCH_COMMAND,
-
-    /* no such key */
-    PRISKV_CLUSTER_STATUS_NO_SUCH_KEY,
-
-    /* no such token */
-    PRISKV_CLUSTER_STATUS_NO_SUCH_TOKEN,
-
-    /* invalid SGL. the number of SGL within a command must not exceed @max_sgl */
-    PRISKV_CLUSTER_STATUS_INVALID_SGL,
-
-    /* invalid regex */
-    PRISKV_CLUSTER_STATUS_INVALID_REGEX,
-
-    /* key is updating */
-    PRISKV_CLUSTER_STATUS_KEY_UPDATING,
-
-    /* connect to server side failed */
-    PRISKV_CLUSTER_STATUS_CONNECT_ERROR,
-
-    /* generic server side failure */
-    PRISKV_CLUSTER_STATUS_SERVER_ERROR,
-
-    /* operation not permitted (e.g., SEAL/RELEASE/DROP with wrong token) */
-    PRISKV_CLUSTER_STATUS_PERMISSION_DENIED,
-
-    /* no enough memory reported by server side */
-    PRISKV_CLUSTER_STATUS_NO_MEM = 0x200,
-
-    /* RDMA disconnected from the server side */
-    PRISKV_CLUSTER_STATUS_DISCONNECTED = 0xF00,
-
-    /* local RDMA error occurs */
-    PRISKV_CLUSTER_STATUS_TRANSPORT_ERROR,
-
-    /* does inflight requests exceed @max_inflight_command? */
-    PRISKV_CLUSTER_STATUS_BUSY,
-
-    /* unexpected protocol error */
-    PRISKV_CLUSTER_STATUS_PROTOCOL_ERROR,
+#undef PRISKV_DECLARE_STATUS
+#define PRISKV_DECLARE_STATUS(NAME, CODE, STR, IS_RESP_STATUS) PRISKV_CLUSTER_STATUS_##NAME = CODE,
+#include "priskv-cluster-status.inc"
+#undef PRISKV_DECLARE_STATUS
 } priskvClusterStatus;
 
 static inline const char *priskv_cluster_status_str(priskvClusterStatus status)
 {
     switch (status) {
-    case PRISKV_CLUSTER_STATUS_OK:
-        return "OK";
-
-    case PRISKV_CLUSTER_STATUS_INVALID_COMMAND:
-        return "Invalid command";
-
-    case PRISKV_CLUSTER_STATUS_KEY_EMPTY:
-        return "Empty key";
-
-    case PRISKV_CLUSTER_STATUS_KEY_TOO_BIG:
-        return "Key too big";
-
-    case PRISKV_CLUSTER_STATUS_VALUE_EMPTY:
-        return "Empty Value";
-
-    case PRISKV_CLUSTER_STATUS_VALUE_TOO_BIG:
-        return "Value too big";
-
-    case PRISKV_CLUSTER_STATUS_NO_SUCH_COMMAND:
-        return "No such command";
-
-    case PRISKV_CLUSTER_STATUS_NO_SUCH_KEY:
-        return "No such key";
-
-    case PRISKV_CLUSTER_STATUS_NO_SUCH_TOKEN:
-        return "No such token";
-
-    case PRISKV_CLUSTER_STATUS_INVALID_SGL:
-        return "Invalid SGL";
-
-    case PRISKV_CLUSTER_STATUS_INVALID_REGEX:
-        return "Invalid regex";
-
-    case PRISKV_CLUSTER_STATUS_KEY_UPDATING:
-        return "Key is updating";
-
-    case PRISKV_CLUSTER_STATUS_CONNECT_ERROR:
-        return "Connect error";
-
-    case PRISKV_CLUSTER_STATUS_SERVER_ERROR:
-        return "Server internal error";
-
-    case PRISKV_CLUSTER_STATUS_PERMISSION_DENIED:
-        return "Permission denied";
-
-    case PRISKV_CLUSTER_STATUS_NO_MEM:
-        return "No memory";
-
-    case PRISKV_CLUSTER_STATUS_DISCONNECTED:
-        return "Disconnected";
-
-    case PRISKV_CLUSTER_STATUS_TRANSPORT_ERROR:
-        return "Transport error";
-
-    case PRISKV_CLUSTER_STATUS_BUSY:
-        return "Busy";
-
-    case PRISKV_CLUSTER_STATUS_PROTOCOL_ERROR:
-        return "Protocol error";
+#undef PRISKV_DECLARE_STATUS
+#define PRISKV_DECLARE_STATUS(NAME, CODE, STR, IS_RESP_STATUS)                                     \
+    case CODE:                                                                                     \
+        return STR;
+#include "priskv-cluster-status.inc"
+#undef PRISKV_DECLARE_STATUS
     }
 
     return "Unknown";

@@ -99,6 +99,7 @@ typedef struct priskv_client_config {
     char *metadata_key;
     int meta_server_connect_timeout_sec;
     bool direct_mode;
+    int ucx_connect_timeout_sec;
 } priskv_client_config_t;
 
 typedef struct priskv_server_config {

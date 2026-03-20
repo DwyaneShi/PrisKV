@@ -28,6 +28,7 @@
 #include <ucs/sys/sock.h>
 #include <unistd.h>
 
+#include "priskv-config.h"
 #include "priskv-protocol.h"
 #include "priskv-protocol-helper.h"
 #include "priskv-log.h"
@@ -755,7 +756,8 @@ static priskv_transport_conn *priskv_ucx_conn_connect(const char *raddr, int rpo
             }
         }
 
-        if (priskv_ucx_connect(connfd, t->ai_addr, t->ai_addrlen, 1000, err_str) == 0) {
+        if (priskv_ucx_connect(connfd, t->ai_addr, t->ai_addrlen,
+                               g_config.client.ucx_connect_timeout_sec * 1000, err_str) == 0) {
             connected = 1;
             break;
         }

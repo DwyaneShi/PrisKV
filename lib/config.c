@@ -36,6 +36,9 @@ static ucs_config_field_t priskv_client_config_table[] = {
     {"CLIENT_DIRECT_MODE", "0", "Enable direct mode, i.e., without Redis as a metadata service.",
      ucs_offsetof(priskv_client_config_t, direct_mode),
      UCS_CONFIG_TYPE_BOOL},
+    {"UCX_CONNECT_TIMEOUT_SEC", "5", "Timeout to connect to UCX server in seconds.",
+     ucs_offsetof(priskv_client_config_t, ucx_connect_timeout_sec),
+     UCS_CONFIG_TYPE_INT},
 
     {NULL}
 };

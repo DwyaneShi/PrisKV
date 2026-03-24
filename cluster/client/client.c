@@ -242,10 +242,14 @@ static inline int priskvClusterNodeOpen(priskvClusterClient *client, priskvClust
 
 static inline void priskvClusterNodeClose(priskvClusterClient *client, priskvClusterNode *node)
 {
-    priskv_close(node->client);
-    node->client = NULL;
-    free(node->addr);
-    node->addr = NULL;
+    if (node->client) {
+        priskv_close(node->client);
+        node->client = NULL;
+    }
+    if (node->addr) {
+        free(node->addr);
+        node->addr = NULL;
+    }
     node->port = 0;
 }
 

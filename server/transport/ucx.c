@@ -23,6 +23,7 @@
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <ucs/sys/string.h>
@@ -590,7 +591,7 @@ static int priskv_ucx_listen_one(char *addr, int port, void *kv, priskv_transpor
         goto out_free_res;
     }
 
-    ret = listen(listenfd, 0);
+    ret = listen(listenfd, SOMAXCONN);
     if (ret < 0) {
         priskv_log_error("UCX: listen failed: %m\n");
         ret = -1;

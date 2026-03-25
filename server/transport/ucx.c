@@ -460,6 +460,7 @@ rej:
 
 static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
 {
+again:
     priskv_log_debug("UCX: listener efd progress event %d, listener %p, efd %d\n", ev, opaque, fd);
 
     priskv_transport_conn *listener = opaque;
@@ -476,10 +477,20 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
     client_addr_len = sizeof(client_addr);
     connfd = accept(listener->listenfd, (struct sockaddr *)&client_addr, &client_addr_len);
     if (connfd < 0) {
-        priskv_log_error("UCX: accept on listenfd %d failed: %m\n", listener->listenfd);
-        return;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // no connection available, return
+            return;
+        } else if (errno == EINTR) {
+            // interrupted by signal, try again
+            goto again;
+        } else {
+            // other errors, log and return
+            priskv_log_error("UCX: accept on listenfd %d failed: %m\n", listener->listenfd);
+            return;
+        }
     }
 
+    // got a connection
     priskv_inet_ntop(&client_addr, peer_addr);
     priskv_log_info("UCX: accept on listenfd %d, connfd %d, client addr %s\n", listener->listenfd,
                     connfd, peer_addr);
@@ -527,12 +538,13 @@ static inline void priskv_ucx_handle_cm(int fd, void *opaque, uint32_t ev)
 
     priskv_thread_submit_function(thread, priskv_ucx_handle_handshake, client);
 
-    return;
+    goto again;
 rej:
     priskv_log_warn("UCX: <%s - %s> %s, reject\n", client->local_addr, client->peer_addr,
                     priskv_cm_status_str(status));
     priskv_ucx_reject(client, status, value);
     priskv_ucx_mark_client_closed(client);
+    goto again;
 }
 
 static int priskv_ucx_listen_one(char *addr, int port, void *kv, priskv_transport_conn_cap *cap)
